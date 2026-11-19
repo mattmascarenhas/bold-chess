@@ -78,6 +78,7 @@ export function cloneState(state: GameState): GameState {
     },
     history: [...state.history],
     positionHistory: state.positionHistory ? [...state.positionHistory] : [],
+    ...(state.offerSeed !== undefined ? { offerSeed: state.offerSeed } : {}),
     ...(state.clock ? { clock: { ...state.clock, remaining: { ...state.clock.remaining } } } : {}),
   };
 }
@@ -146,6 +147,7 @@ export function createInitialState(_skipDraftWithDefault = true): GameState {
     capturedBy: { w: [], b: [] },
     history: [],
     positionHistory: [],
+    offerSeed: newOfferSeed(),
   };
 }
 
@@ -209,22 +211,36 @@ function hashSeed(str: string): number {
   return h >>> 0;
 }
 
+function newOfferSeed(): number {
+  return Math.floor(Math.random() * 0x100000000) >>> 0;
+}
+
+/** PRNG mulberry32: boa distribuicao em todos os bits (a semente vem do estado). */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /**
- * Oferta deterministica de ate 3 especiais para o jogador na posicao atual.
- * Deterministica (semente = estado) para cliente, motor e servidor concordarem
- * sem guardar estado extra; muda a cada jogada.
+ * Oferta de ate 3 especiais sorteados. A semente (state.offerSeed) e sorteada de novo a cada
+ * jogada, entao cada convocacao e aleatoria; dentro de um mesmo estado a oferta e sempre a
+ * mesma, para cliente, motor e servidor concordarem (a oferta da convocacao fica gravada no estado).
  */
 export function getConvocationOffer(state: GameState, color: Color): SpecialId[] {
   const avail = getAvailableSquadSpecials(state, color);
   if (avail.length <= CONVOCATION_OFFER_SIZE) return avail;
-  let seed = hashSeed(
-    `${color}|${state.history.length}|${state.fullMoveNumber}|${state.usedSpecials[color].join(',')}`
-  );
+  const base =
+    state.offerSeed ?? hashSeed(`${state.history.length}|${state.fullMoveNumber}|${state.usedSpecials.w.length}${state.usedSpecials.b.length}`);
+  const rand = mulberry32((base ^ hashSeed(color)) >>> 0);
   const pool = [...avail];
   const out: SpecialId[] = [];
   while (out.length < CONVOCATION_OFFER_SIZE && pool.length > 0) {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    out.push(pool.splice(seed % pool.length, 1)[0]);
+    out.push(pool.splice(Math.floor(rand() * pool.length), 1)[0]);
   }
   return out;
 }
@@ -779,6 +795,7 @@ export function isKingInCheck(state: GameState, color: Color): boolean {
 
 function applyMoveRaw(state: GameState, move: MoveOption): GameState {
   const next = cloneState(state);
+  next.offerSeed = newOfferSeed();
   if (!next.positionHistory || next.positionHistory.length === 0) {
     next.positionHistory = [computePositionKey(state)];
   }

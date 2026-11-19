@@ -181,6 +181,8 @@ export interface GameState {
   capturedBy: Record<Color, PieceKind[]>;
   history: MoveRecord[];
   positionHistory?: string[];
+  /** Semente do sorteio das pecas especiais oferecidas; muda a cada jogada. */
+  offerSeed?: number;
   /** Relogio da partida; ausente = modo livre (sem tempo). */
   clock?: ClockState;
 }

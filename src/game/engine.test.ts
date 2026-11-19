@@ -339,3 +339,30 @@ test('convocation offer is exactly 3 distinct specials, deterministic, and enfor
   }
   assert.ok(promoKinds.filter((k) => !['q', 'r', 'b', 'n'].includes(k as string)).length <= 3);
 });
+
+test('oferta de especiais: aleatoria entre partidas, estavel dentro do mesmo estado', () => {
+  const ids = new Set<string>();
+  const firsts = new Map<string, number>();
+  for (let i = 0; i < 300; i++) {
+    const s = emptyPlayableState();
+    s.offerSeed = Math.floor(Math.random() * 2 ** 32);
+    const a = getConvocationOffer(s, 'w');
+    assert.deepEqual(a, getConvocationOffer(s, 'w')); // mesmo estado => mesma oferta
+    ids.add(a.join(','));
+    for (const id of a) firsts.set(id, (firsts.get(id) ?? 0) + 1);
+  }
+  assert.ok(ids.size > 40, 'poucas combinacoes diferentes: ' + ids.size); // 120 combinacoes possiveis
+  assert.equal(firsts.size, 10); // todas as pecas aparecem
+  for (const n of firsts.values()) assert.ok(n > 40 && n < 160, 'distribuicao enviesada: ' + n); // ~90 esperado
+});
+
+test('oferta de especiais: cada jogada sorteia de novo', () => {
+  const offers = new Set<string>();
+  for (let i = 0; i < 60; i++) {
+    const s = emptyPlayableState();
+    place(s, 3, 2, { color: 'w', kind: 'p' });
+    const s2 = applyMove(s, { kind: 'move', from: { row: 3, col: 2 }, to: { row: 2, col: 2 } });
+    offers.add(s2.pendingConvocation!.availableSpecials.join(','));
+  }
+  assert.ok(offers.size > 15, 'mesma posicao deu poucas ofertas: ' + offers.size);
+});
