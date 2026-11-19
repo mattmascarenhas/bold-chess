@@ -1,0 +1,124 @@
+import { randomUUID } from 'node:crypto';
+import type express from 'express';
+import type { PlayerIdentity, PointsAward } from '../src/shared/protocol';
+import { computeScore } from '../src/shared/scoring';
+import type { FinishMatchInput, Leaderboard, MatchRecord, Store } from './types';
+
+function noCount(input: FinishMatchInput, reason: PointsAward['reason']): PointsAward[] {
+  const ids = [input.white?.userId, input.black?.userId].filter((x): x is string => !!x);
+  return ids.map((userId) => ({ userId, delta: 0, total: 0, counted: false, reason }));
+}
+
+export function createLeaderboard(store: Store): Leaderboard {
+  return {
+    async finishMatch(input: FinishMatchInput): Promise<PointsAward[]> {
+      const { white, black } = input;
+      if (!white || !black) return noCount(input, 'vs_ai');
+      if (white.userId === black.userId) return noCount(input, 'same_user');
+
+      try {
+        const [ws, bs, pairToday] = await Promise.all([
+          store.getStats(white.userId),
+          store.getStats(black.userId),
+          store.countPairToday(white.userId, black.userId),
+        ]);
+        const wPts = ws?.points ?? 0;
+        const bPts = bs?.points ?? 0;
+        const score = computeScore({
+          whiteId: white.userId,
+          blackId: black.userId,
+          result: input.result,
+          whitePoints: wPts,
+          blackPoints: bPts,
+          moves: input.moves,
+          pairMatchesToday: pairToday,
+        });
+        const rec: MatchRecord = {
+          id: randomUUID(),
+          roomId: input.roomId,
+          white,
+          black,
+          result: input.result,
+          reason: input.reason,
+          moves: input.moves,
+          counted: score.counted,
+          whiteDelta: score.white,
+          blackDelta: score.black,
+          endedAt: Date.now(),
+        };
+        await store.recordMatch(rec);
+        return [
+          { userId: white.userId, delta: score.white, total: wPts + score.white, counted: score.counted, reason: score.reason },
+          { userId: black.userId, delta: score.black, total: bPts + score.black, counted: score.counted, reason: score.reason },
+        ];
+      } catch (err) {
+        console.error('[leaderboard] finishMatch falhou:', err);
+        return [white, black].map((p) => ({ userId: p.userId, delta: 0, total: 0, counted: false }));
+      }
+    },
+  };
+}
+
+function parseLimit(raw: unknown, def: number, max: number): number | null {
+  if (raw === undefined) return def;
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  if (n < 1 || n > max) return null;
+  return n;
+}
+
+function publicIdentity(p: PlayerIdentity) {
+  return { userId: p.userId, name: p.name, avatarUrl: p.avatarUrl };
+}
+
+export function registerLeaderboardRoutes(app: express.Express, store: Store): void {
+  app.get('/api/leaderboard', async (req, res) => {
+    const limit = parseLimit(req.query.limit, 50, 100);
+    if (limit === null) return res.status(400).json({ error: 'invalid_limit' });
+    try {
+      res.json({ entries: await store.getTop(limit) });
+    } catch (err) {
+      console.error('[leaderboard] getTop falhou:', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.get('/api/leaderboard/me', async (req, res) => {
+    const userId = req.query.userId;
+    if (typeof userId !== 'string' || userId.length === 0 || userId.length > 200) {
+      return res.status(400).json({ error: 'invalid_user_id' });
+    }
+    try {
+      const [rank, stats] = await Promise.all([store.getRank(userId), store.getStats(userId)]);
+      res.json({ rank, stats });
+    } catch (err) {
+      console.error('[leaderboard] me falhou:', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.get('/api/matches/recent', async (req, res) => {
+    const limit = parseLimit(req.query.limit, 20, 100);
+    if (limit === null) return res.status(400).json({ error: 'invalid_limit' });
+    try {
+      const recs = await store.recentMatches(limit);
+      const matches = recs.map((m) => ({
+        id: m.id,
+        roomId: m.roomId,
+        white: publicIdentity(m.white),
+        black: publicIdentity(m.black),
+        result: m.result,
+        reason: m.reason,
+        moves: m.moves,
+        counted: m.counted,
+        whiteDelta: m.whiteDelta,
+        blackDelta: m.blackDelta,
+        endedAt: m.endedAt,
+      }));
+      res.json({ matches });
+    } catch (err) {
+      console.error('[leaderboard] recent falhou:', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+}

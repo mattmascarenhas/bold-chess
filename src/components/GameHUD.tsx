@@ -369,19 +369,21 @@ export function GameHUD({
                 ))}
               </div>
 
-              {/* Emotes Button */}
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  setEmotesOpen((prev) => !prev);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-[#00E676] border border-slate-700 transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                {emoteCooldownSec > 0 ? `Emotes (${emoteCooldownSec}s)` : 'Emotes'}
-              </button>
+              {/* Emotes Button (espectador nao envia emotes) */}
+              {playerColor !== 'spectator' && (
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    setEmotesOpen((prev) => !prev);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-[#00E676] border border-slate-700 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  {emoteCooldownSec > 0 ? `Emotes (${emoteCooldownSec}s)` : 'Emotes'}
+                </button>
+              )}
 
               {/* Volume Slider */}
               <div className="hidden md:flex items-center gap-2 px-2">
@@ -397,20 +399,22 @@ export function GameHUD({
                 />
               </div>
 
-              {/* Resign */}
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  onResign();
-                }}
-                aria-label="Desistir da partida"
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-red-950/70 text-xs font-semibold text-red-400 border border-slate-800 hover:border-red-700/60 transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <Flag className="w-3.5 h-3.5" />
-                Desistir
-              </button>
+              {/* Resign (espectador nao desiste) */}
+              {playerColor !== 'spectator' && (
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    onResign();
+                  }}
+                  aria-label="Desistir da partida"
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-red-950/70 text-xs font-semibold text-red-400 border border-slate-800 hover:border-red-700/60 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Flag className="w-3.5 h-3.5" />
+                  Desistir
+                </button>
+              )}
             </div>
           )}
         </div>

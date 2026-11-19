@@ -1,27 +1,25 @@
-import { useState } from 'react';
-import { Bot, Building2, Link2, Users } from 'lucide-react';
+import { Bot, Building2, Swords } from 'lucide-react';
+import type { SocketStatus } from '../net/socket';
+import { Avatar, ConnectionBadge } from './Lobby';
 import { SCENE_ROOMS, SceneRoomId } from '../game/types';
 
 interface TitleOverlayProps {
   selectedRoom: SceneRoomId;
   onSelectRoom: (roomId: SceneRoomId) => void;
   onStartAI: () => void;
-  onCreateRoom: () => void;
-  onJoinRoom: (roomId: string) => void;
-  isCreatingRoom: boolean;
+  onOpenLobby: () => void;
+  user: { name: string; avatarUrl: string | null } | null;
+  connection: SocketStatus;
 }
 
 export function TitleOverlay({
   selectedRoom,
   onSelectRoom,
   onStartAI,
-  onCreateRoom,
-  onJoinRoom,
-  isCreatingRoom,
+  onOpenLobby,
+  user,
+  connection,
 }: TitleOverlayProps) {
-  const [joinCode, setJoinCode] = useState('');
-  const [showJoinInput, setShowJoinInput] = useState(false);
-
   const activeRoomMeta = SCENE_ROOMS.find((r) => r.id === selectedRoom) ?? SCENE_ROOMS[0];
 
   return (
@@ -147,50 +145,17 @@ export function TitleOverlay({
 
           <button
             type="button"
-            onClick={onCreateRoom}
-            disabled={isCreatingRoom}
-            className="w-full flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-xl bg-[#0047A0] hover:bg-[#0b56b8] text-white font-display font-semibold text-sm border border-[#38bdf8]/30 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
+            onClick={onOpenLobby}
+            className="w-full flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-xl bg-[#0047A0] hover:bg-[#0b56b8] text-white font-display font-semibold text-sm border border-[#38bdf8]/30 transition-colors cursor-pointer whitespace-nowrap"
           >
-            <Link2 className="w-4 h-4" />
-            {isCreatingRoom ? 'Criando sala...' : 'Criar Sala Multiplayer'}
+            <Swords className="w-4 h-4" />
+            Multiplayer e Lobby
           </button>
-
-          {!showJoinInput ? (
-            <button
-              type="button"
-              onClick={() => setShowJoinInput(true)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 text-sm font-medium border border-slate-700/70 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Users className="w-4 h-4 text-[#00E5C3]" />
-              Entrar com código de sala
-            </button>
-          ) : (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (joinCode.trim().length >= 3) {
-                  onJoinRoom(joinCode.trim().toUpperCase());
-                }
-              }}
-              className="flex gap-2"
-            >
-              <input
-                type="text"
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                placeholder="Código (ex: BOLD42)"
-                aria-label="Código da sala"
-                maxLength={10}
-                className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white font-mono-tabular placeholder:text-slate-500 focus:outline-none focus:border-[#00E676]"
-              />
-              <button
-                type="submit"
-                className="px-4 py-2.5 rounded-xl bg-[#00E5C3] text-slate-950 font-semibold text-sm hover:bg-[#22f3d2] transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              >
-                Entrar
-              </button>
-            </form>
-          )}
+          <div className="flex items-center gap-2 justify-center min-h-[26px]">
+            {user && <Avatar user={user} size={22} />}
+            {user && <span className="text-xs text-slate-300 truncate max-w-[10rem]">{user.name}</span>}
+            <ConnectionBadge status={connection} />
+          </div>
         </div>
 
         {/* Robôzinho mini greeting strip */}

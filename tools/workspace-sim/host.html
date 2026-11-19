@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__SIM_TITLE__</title>
+<style>
+  :root { --bg:#f4f5f7; --fg:#1c1e21; --card:#fff; --bd:#d8dbe0; --acc:#2d6cdf; }
+  body.dark { --bg:#17181c; --fg:#e6e7ea; --card:#22242a; --bd:#3a3d45; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 13px system-ui, sans-serif; background: var(--bg); color: var(--fg); display: flex; flex-direction: column; }
+  header { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: var(--card); border-bottom: 1px solid var(--bd); }
+  .who { font-weight: 600; }
+  .who small { font-weight: 400; opacity: .7; }
+  #addr { flex: 1; font: 12px ui-monospace, monospace; padding: 4px 8px; border: 1px solid var(--bd); border-radius: 6px; background: var(--bg); color: var(--fg); min-width: 0; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #stage { flex: 1; position: relative; min-width: 0; }
+  #stage iframe { width: 100%; height: 100%; border: 0; background: #fff; display: block; }
+  .overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); color: #fff; font-size: 16px; text-align: center; }
+  .overlay.on { display: flex; }
+  aside { width: 320px; border-left: 1px solid var(--bd); background: var(--card); display: flex; flex-direction: column; min-height: 0; }
+  aside.collapsed { display: none; }
+  .ctl { padding: 6px; display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--bd); }
+  button { font: inherit; padding: 3px 7px; border: 1px solid var(--bd); background: var(--bg); color: var(--fg); border-radius: 5px; cursor: pointer; }
+  button.on { background: var(--acc); color: #fff; border-color: var(--acc); }
+  input[type=text] { font: inherit; padding: 3px 5px; border: 1px solid var(--bd); border-radius: 5px; background: var(--bg); color: var(--fg); width: 120px; }
+  h4 { margin: 0; padding: 4px 8px; font-size: 11px; text-transform: uppercase; opacity: .7; border-bottom: 1px solid var(--bd); }
+  #notifs { max-height: 130px; overflow: auto; }
+  .notif { padding: 4px 8px; border-bottom: 1px solid var(--bd); }
+  .notif.success { border-left: 3px solid #2e9d50; } .notif.error { border-left: 3px solid #d33; }
+  .notif.warning { border-left: 3px solid #e0a000; } .notif.info { border-left: 3px solid var(--acc); }
+  #log { flex: 1; overflow: auto; font: 11px ui-monospace, monospace; }
+  .l { padding: 2px 6px; border-bottom: 1px solid var(--bd); white-space: pre-wrap; word-break: break-all; }
+  .l.in { color: #2d6cdf; } .l.out { color: #2e9d50; } .l.drop { color: #d33; } .l.sys { opacity: .6; }
+  body.dark .l.in { color: #7aa7ff; } body.dark .l.out { color: #6fd28a; }
+</style>
+</head>
+<body>
+<header>
+  <span class="who" id="who"></span>
+  <span id="status" title="status do app">carregando...</span>
+  <input id="addr" readonly aria-label="Endereco simulado">
+  <button id="togglePanel">painel</button>
+</header>
+<main>
+  <div id="stage">
+    <iframe id="game" allow="clipboard-write; fullscreen"></iframe>
+    <div class="overlay" id="loading">Carregando (BOLD_SHOW_LOADING)...</div>
+    <div class="overlay" id="offline">Host sem rede: nao responde ao bridge</div>
+  </div>
+  <aside id="panel">
+    <div class="ctl">
+      <button id="bTheme">tema</button>
+      <button id="bLang">idioma</button>
+      <button id="bTab">aba ativa</button>
+      <button id="bNet">rede on</button>
+      <button id="bExp">expirar token</button>
+      <button id="bReload">recarregar</button>
+      <button id="bUsers">push usuarios</button>
+      <button id="bClear">limpar log</button>
+    </div>
+    <div class="ctl">
+      <input id="navPath" type="text" value="/sala/ABC123" aria-label="Caminho">
+      <button id="bNav">BOLD_NAVIGATE</button>
+    </div>
+    <h4>Notificacoes</h4><div id="notifs"></div>
+    <h4>Mensagens</h4><div id="log"></div>
+  </aside>
+</main>
+<script>window.__SIM__ = /*__SIM_CONFIG__*/{};</script>
+<script type="module" src="/host.js"></script>
+</body>
+</html>

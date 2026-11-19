@@ -1242,10 +1242,13 @@ export function resolveConvocation(
       piece.kind = choice;
       piece.abilityUsed = false;
       next.usedSpecials[pending.color].push(choice);
-    } else if (pending.isLastRank) {
+    } else if (
+      pending.isLastRank &&
+      (choice === 'q' || choice === 'r' || choice === 'b' || choice === 'n')
+    ) {
       piece.kind = choice;
     } else {
-      // Cannot promote to classic piece on 6th rank
+      // Cannot promote to classic piece on 6th rank, nem para rei/peao/valor invalido
       return state;
     }
   } else if (pending.isLastRank) {

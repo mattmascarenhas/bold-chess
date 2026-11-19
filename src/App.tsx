@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { soundEngine } from './audio/soundEngine';
 import { ConvocationModal } from './components/ConvocationModal';
 import { GameHUD } from './components/GameHUD';
+import { InviteToast, MatchPointsCard, inviteResultText, type IncomingInvite, type Notice } from './components/InviteToast';
+import { Lobby } from './components/Lobby';
+import { SpectatorBar } from './components/SpectatorBar';
+import Leaderboard from './components/Leaderboard';
 import { StatusModal } from './components/StatusModal';
 import { TitleOverlay } from './components/TitleOverlay';
 import {
@@ -24,8 +28,75 @@ import {
   getPieceDisplayName,
 } from './game/types';
 import { CameraPreset, ChessScene } from './three/ChessScene';
+import { GameSocket, type SocketStatus } from './net/socket';
+import {
+  getToken,
+  initWorkspace,
+  notifyLocal,
+  onNavigate,
+  onTabActive,
+  onThemeChange,
+  setReady,
+  setTitle,
+  WorkspaceError,
+} from './workspace/bridge';
+import {
+  ROOM_CODE_REGEX,
+  type ClientMessage,
+  type ErrorCode,
+  type MatchResult,
+  type OnlineUser,
+  type PointsAward,
+  type RoomSeatInfo,
+  type RoomSummary,
+  type Seat,
+} from './shared/protocol';
 
-type AppScreenState = 'title' | 'playing' | 'paused' | 'gameover';
+type AppScreenState = 'title' | 'lobby' | 'playing' | 'paused' | 'gameover';
+
+interface MeInfo {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+}
+
+interface MatchEndInfo {
+  result: MatchResult;
+  reason: string;
+  points: PointsAward[];
+}
+
+const ERROR_TEXT: Partial<Record<ErrorCode, string>> = {
+  not_authenticated: 'Você ainda não está autenticado. Aguarde a conexão.',
+  room_not_found: 'Sala não encontrada. Confira o código e tente de novo.',
+  room_full: 'A sala está cheia.',
+  not_your_turn: 'Não é a sua vez.',
+  not_a_player: 'Espectadores não podem jogar.',
+  user_offline: 'Esse jogador está offline.',
+  user_busy: 'Esse jogador já está em uma partida.',
+  self_challenge: 'Você não pode desafiar a si mesmo.',
+  rate_limited: 'Muitas ações em pouco tempo. Aguarde um instante.',
+  bad_request: 'Pedido inválido.',
+};
+
+function readRoomParam(): string | null {
+  const v = new URLSearchParams(window.location.search).get('room');
+  return v ? v.trim().toUpperCase() : null;
+}
+
+function writeRoomParam(code: string | null) {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (code) params.set('room', code);
+    else params.delete('room');
+    const qs = params.toString();
+    window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+  } catch {
+    /* ambientes sem history */
+  }
+}
+
+let noticeSeq = 1;
 
 export default function App() {
   const isAutostart =
@@ -40,16 +111,46 @@ export default function App() {
   const [selectedSquare, setSelectedSquare] = useState<Pos | null>(null);
   const [legalMoves, setLegalMoves] = useState<MoveOption[]>([]);
   const [pendingPromotionDest, setPendingPromotionDest] = useState<Pos | null>(null);
-  const [playerColor, setPlayerColor] = useState<Color | 'spectator'>('w');
+  const [playerColor, setPlayerColor] = useState<Seat>('w');
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('white');
   const [sceneRoom, setSceneRoom] = useState<SceneRoomId>('bold_office');
   const [aiThinking, setAiThinking] = useState(false);
 
-  // Multiplayer room state
+  // Workspace / conexao
+  const [boot, setBoot] = useState<{ phase: 'loading' | 'ready' | 'error'; error?: WorkspaceError | Error }>({
+    phase: 'loading',
+  });
+  const [bootNonce, setBootNonce] = useState(0);
+  const [me, setMe] = useState<MeInfo | null>(null);
+  const [connection, setConnection] = useState<SocketStatus>('idle');
+  const socketRef = useRef<GameSocket | null>(null);
+
+  // Lobby / sala
+  const [online, setOnline] = useState<OnlineUser[]>([]);
+  const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [roomId, setRoomId] = useState<string | null>(null);
-  const [playersConnected, setPlayersConnected] = useState(1);
+  const [seats, setSeats] = useState<RoomSeatInfo | null>(null);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [challengingUserId, setChallengingUserId] = useState<string | null>(null);
+  const [invites, setInvites] = useState<IncomingInvite[]>([]);
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const [matchEnd, setMatchEnd] = useState<MatchEndInfo | null>(null);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+
+  // Espelhos em ref para handlers do socket (evita reconectar a cada render)
+  const screenRef = useRef(screen);
+  const modeRef = useRef(mode);
+  const roomIdRef = useRef<string | null>(null);
+  const meRef = useRef<MeInfo | null>(null);
+  const tabActiveRef = useRef(true);
+  const pendingJoinRef = useRef<string | null>(readRoomParam());
+  const lastJoinRef = useRef<{ code: string; asSpectator: boolean } | null>(null);
+  const firstAuthRef = useRef(true);
+  const sceneRoomRef = useRef(sceneRoom);
+  screenRef.current = screen;
+  modeRef.current = mode;
+  sceneRoomRef.current = sceneRoom;
+  meRef.current = me;
 
   // Audio & Mascot Narrator state
   const [muted, setMuted] = useState(false);
@@ -64,11 +165,22 @@ export default function App() {
   const aiReqIdRef = useRef(0);
   const lastHistoryLenRef = useRef(0);
 
+  const pushNotice = useCallback((text: string, kind: Notice['kind'] = 'info') => {
+    const id = noticeSeq++;
+    setNotices((prev) => [...prev.slice(-3), { id, kind, text }]);
+    window.setTimeout(() => setNotices((prev) => prev.filter((n) => n.id !== id)), 6000);
+  }, []);
+
   // Mirror screen & selected 3D room state to document.body.dataset
   useEffect(() => {
     document.body.dataset.state = screen;
     document.body.dataset.room = sceneRoom;
   }, [screen, sceneRoom]);
+
+  // Titulo do painel no Workspace
+  useEffect(() => {
+    if (boot.phase === 'ready') setTitle(roomId ? `Xadrez Bold - sala ${roomId}` : 'Xadrez Bold');
+  }, [roomId, boot.phase]);
 
   // Load audio manifest once
   useEffect(() => {
@@ -211,61 +323,263 @@ export default function App() {
     }
   }, [mode, screen, gameState]);
 
-  // Connect to WebSocket room
-  const connectToRoom = useCallback((id: string) => {
-    wsRef.current?.close();
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'join', roomId: id }));
-    };
-
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data as string) as {
-        type: string;
-        roomId?: string;
-        sceneRoom?: SceneRoomId;
-        yourColor?: Color | 'spectator';
-        state?: GameState;
-        playersConnected?: number;
-        emoteId?: string;
-        fromColor?: Color;
-      };
-
-      if (msg.type === 'joined' && msg.state) {
-        setRoomId(msg.roomId ?? id);
-        if (msg.sceneRoom) setSceneRoom(msg.sceneRoom);
-        setMode('multiplayer');
-        setPlayerColor(msg.yourColor ?? 'w');
-        setCameraPreset(msg.yourColor === 'b' ? 'black' : 'white');
-        setPlayersConnected(msg.playersConnected ?? 1);
-        setGameState(msg.state);
-        setSelectedSquare(null);
-        setLegalMoves([]);
-        setScreen('playing');
-      } else if (msg.type === 'state' && msg.state) {
-        setGameState(msg.state);
-        setSelectedSquare(null);
-        setLegalMoves([]);
-      } else if (msg.type === 'presence' && typeof msg.playersConnected === 'number') {
-        setPlayersConnected(msg.playersConnected);
-      } else if (msg.type === 'emote' && msg.emoteId) {
-        const em = MEME_EMOTES.find((e) => e.id === msg.emoteId);
-        if (em) {
-          soundEngine.playEmote(em.id);
-          setRobotSpeaker(msg.fromColor === 'b' ? 'Pretas (Emote)' : 'Brancas (Emote)');
-          setRobotSpeech(em.speech);
-        }
-      }
-    };
+  // ---------- Sala: helpers ----------
+  /** Sai da sala so no estado local (o servidor ja sabe ou nao precisa saber). */
+  const resetRoomLocal = useCallback((nextScreen: AppScreenState) => {
+    roomIdRef.current = null;
+    setRoomId(null);
+    setSeats(null);
+    setMatchEnd(null);
+    setIsCreatingRoom(false);
+    setPlayerColor('w');
+    setCameraPreset('white');
+    setSelectedSquare(null);
+    setLegalMoves([]);
+    setPendingPromotionDest(null);
+    setGameState(createInitialState(false));
+    writeRoomParam(null);
+    setMode('ai');
+    setScreen(nextScreen);
   }, []);
 
+  const joinRoom = useCallback((code: string, asSpectator = false) => {
+    const clean = code.trim().toUpperCase();
+    if (!ROOM_CODE_REGEX.test(clean)) {
+      pushNotice('Código de sala inválido. Use 6 caracteres (letras e números).', 'error');
+      return;
+    }
+    lastJoinRef.current = { code: clean, asSpectator };
+    socketRef.current?.send({ type: 'join', roomId: clean, asSpectator: asSpectator || undefined });
+  }, [pushNotice]);
+
+  const leaveRoom = useCallback(() => {
+    if (roomIdRef.current) socketRef.current?.send({ type: 'leave' });
+    resetRoomLocal('lobby');
+  }, [resetRoomLocal]);
+
+  // ---------- Boot: Workspace + WebSocket ----------
+  useEffect(() => {
+    let cancelled = false;
+    const cleanups: Array<() => void> = [];
+    setBoot({ phase: 'loading' });
+    firstAuthRef.current = true;
+
+    (async () => {
+      try {
+        const init = await initWorkspace();
+        if (cancelled) return;
+        setMe(init.identity);
+        meRef.current = init.identity;
+
+        cleanups.push(onThemeChange(() => {}));
+        cleanups.push(
+          onTabActive((active) => {
+            tabActiveRef.current = active;
+            document.body.dataset.tabActive = active ? '1' : '0';
+          })
+        );
+        cleanups.push(
+          onNavigate((path) => {
+            try {
+              const target = new URL(path, window.location.origin);
+              const code = (target.searchParams.get('room') ?? '').toUpperCase();
+              if (code && code !== roomIdRef.current) {
+                pendingJoinRef.current = code;
+                joinRoom(code);
+              } else if (!code && roomIdRef.current && modeRef.current === 'multiplayer') {
+                leaveRoom();
+              }
+            } catch {
+              /* rota invalida: ignora */
+            }
+          })
+        );
+
+        const socket = new GameSocket({ getToken });
+        socketRef.current = socket;
+        cleanups.push(() => {
+          socket.close();
+          if (socketRef.current === socket) socketRef.current = null;
+        });
+
+        socket.on('status', (st) => setConnection(st));
+
+        socket.on('auth_ok', (msg) => {
+          const ws = meRef.current;
+          setMe({
+            userId: msg.me.userId,
+            name: ws?.name || msg.me.name,
+            avatarUrl: ws?.avatarUrl ?? msg.me.avatarUrl,
+          });
+          setBoot({ phase: 'ready' });
+          setReady();
+          socket.send({ type: 'lobby_list' });
+          if (firstAuthRef.current) {
+            firstAuthRef.current = false;
+            const target = pendingJoinRef.current ?? msg.resumeRoomId;
+            pendingJoinRef.current = null;
+            if (target && !socket.roomId) joinRoom(target);
+          }
+        });
+
+        socket.on('auth_error', (msg) => {
+          if (msg.code === 'invalid_token') {
+            setBoot({
+              phase: 'error',
+              error: new Error('Sua sessão do Workspace não é válida. Recarregue ou entre novamente.'),
+            });
+          } else if (msg.code === 'auth_unavailable') {
+            pushNotice('Autenticação indisponível no momento. Tentando de novo...', 'error');
+          }
+        });
+
+        socket.on('lobby', (msg) => {
+          setOnline(msg.online);
+          setRooms(msg.rooms);
+        });
+
+        socket.on('room_created', (msg) => {
+          setIsCreatingRoom(false);
+          // O servidor pode ou nao entrar o criador automaticamente: garante a entrada.
+          window.setTimeout(() => {
+            if (roomIdRef.current !== msg.roomId) joinRoom(msg.roomId);
+          }, 300);
+        });
+
+        socket.on('joined', (msg) => {
+          roomIdRef.current = msg.roomId;
+          lastJoinRef.current = null;
+          pendingJoinRef.current = null;
+          setRoomId(msg.roomId);
+          setSceneRoom(msg.sceneRoom);
+          setMode('multiplayer');
+          setPlayerColor(msg.yourSeat);
+          setCameraPreset(msg.yourSeat === 'b' ? 'black' : 'white');
+          setSeats(msg.seats);
+          setGameState(msg.state);
+          setSelectedSquare(null);
+          setLegalMoves([]);
+          setPendingPromotionDest(null);
+          setIsCreatingRoom(false);
+          setChallengingUserId(null);
+          if (!msg.resumed) setMatchEnd(null);
+          writeRoomParam(msg.roomId);
+          setScreen('playing');
+        });
+
+        socket.on('seats', (msg) => setSeats(msg.seats));
+
+        socket.on('left', () => {
+          if (roomIdRef.current) resetRoomLocal('lobby');
+        });
+
+        socket.on('state', (msg) => {
+          setGameState(msg.state);
+          setSelectedSquare(null);
+          setLegalMoves([]);
+          if (!msg.state.winner && screenRef.current === 'gameover' && modeRef.current === 'multiplayer') {
+            setMatchEnd(null);
+            setScreen('playing');
+          }
+        });
+
+        socket.on('emote', (msg) => {
+          const em = MEME_EMOTES.find((e) => e.id === msg.emoteId);
+          if (em) {
+            soundEngine.playEmote(em.id);
+            setRobotSpeaker(msg.fromColor === 'b' ? 'Pretas (Emote)' : 'Brancas (Emote)');
+            setRobotSpeech(em.speech);
+          }
+        });
+
+        socket.on('invite', (msg) => {
+          setInvites((prev) =>
+            prev.some((i) => i.inviteId === msg.inviteId)
+              ? prev
+              : [...prev, { inviteId: msg.inviteId, from: msg.from, roomId: msg.roomId, expiresAt: msg.expiresAt }]
+          );
+          if (!tabActiveRef.current) notifyLocal('Xadrez Bold', `${msg.from.name} te desafiou para uma partida`);
+        });
+
+        socket.on('invite_result', (msg) => {
+          setChallengingUserId(null);
+          setInvites((prev) => prev.filter((i) => i.inviteId !== msg.inviteId));
+          const t = inviteResultText(msg.status);
+          pushNotice(t.text, t.kind);
+          if (msg.status === 'accepted' && msg.roomId && roomIdRef.current !== msg.roomId) {
+            joinRoom(msg.roomId);
+          }
+        });
+
+        socket.on('match_ended', (msg) => {
+          setMatchEnd({ result: msg.result, reason: msg.reason, points: msg.points });
+        });
+
+        socket.on('error', (msg) => {
+          setIsCreatingRoom(false);
+          const text = msg.message || ERROR_TEXT[msg.code] || 'Algo deu errado.';
+          if (msg.code === 'room_not_found') {
+            pushNotice(text, 'error');
+            lastJoinRef.current = null;
+            if (!roomIdRef.current) {
+              writeRoomParam(null);
+              setScreen((s) => (s === 'playing' || s === 'gameover' ? 'lobby' : s === 'title' ? 'lobby' : s));
+            }
+            return;
+          }
+          if (msg.code === 'room_full' && lastJoinRef.current && !lastJoinRef.current.asSpectator) {
+            const { code } = lastJoinRef.current;
+            lastJoinRef.current = { code, asSpectator: true };
+            socket.send({ type: 'join', roomId: code, asSpectator: true });
+            pushNotice('Sala cheia: entrando como espectador.', 'info');
+            return;
+          }
+          if (msg.code === 'user_busy' || msg.code === 'user_offline') setChallengingUserId(null);
+          pushNotice(text, 'error');
+        });
+
+        socket.connect();
+      } catch (err) {
+        if (cancelled) return;
+        setBoot({ phase: 'error', error: err instanceof Error ? err : new Error(String(err)) });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      cleanups.forEach((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootNonce]);
+
+  // Deep link com a conexao pronta, vindo da URL: lobby se nao ha ?room (tela inicial fica como esta)
+  // Lobby: atualiza lista periodicamente enquanto aberto
+  useEffect(() => {
+    if (screen !== 'lobby' || connection !== 'ready') return;
+    socketRef.current?.send({ type: 'lobby_list' });
+    const id = window.setInterval(() => socketRef.current?.send({ type: 'lobby_list' }), 8000);
+    return () => window.clearInterval(id);
+  }, [screen, connection]);
+
+  // Timeout de seguranca para estados "aguardando"
+  useEffect(() => {
+    if (!challengingUserId) return;
+    const id = window.setTimeout(() => setChallengingUserId(null), 65_000);
+    return () => clearTimeout(id);
+  }, [challengingUserId]);
+  useEffect(() => {
+    if (!isCreatingRoom) return;
+    const id = window.setTimeout(() => setIsCreatingRoom(false), 6000);
+    return () => clearTimeout(id);
+  }, [isCreatingRoom]);
+
   const handleStartAI = useCallback((_skipDraft = true) => {
-    wsRef.current?.close();
-    wsRef.current = null;
+    if (roomIdRef.current) socketRef.current?.send({ type: 'leave' });
+    roomIdRef.current = null;
     setRoomId(null);
+    setSeats(null);
+    setMatchEnd(null);
+    writeRoomParam(null);
     setMode('ai');
     setPlayerColor('w');
     setCameraPreset('white');
@@ -280,41 +594,35 @@ export default function App() {
     setScreen('playing');
   }, []);
 
-  const handleCreateRoom = useCallback(async () => {
+  const handleCreateRoom = useCallback(() => {
+    if (!socketRef.current) return;
     setIsCreatingRoom(true);
-    try {
-      const res = await fetch('/api/rooms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sceneRoom }),
-      });
-      const data = (await res.json()) as { roomId: string; sceneRoom?: SceneRoomId };
-      window.history.replaceState({}, '', `/?room=${data.roomId}`);
-      connectToRoom(data.roomId);
-    } finally {
-      setIsCreatingRoom(false);
-    }
-  }, [connectToRoom, sceneRoom]);
+    socketRef.current.send({ type: 'create_room', sceneRoom });
+  }, [sceneRoom]);
 
-  const handleJoinRoom = useCallback(
-    (code: string) => {
-      window.history.replaceState({}, '', `/?room=${code}`);
-      connectToRoom(code);
+  const handleChallenge = useCallback(
+    (userId: string) => {
+      setChallengingUserId(userId);
+      socketRef.current?.send({ type: 'challenge', targetUserId: userId, sceneRoom });
+      pushNotice('Desafio enviado. Aguardando resposta...', 'info');
     },
-    [connectToRoom]
+    [sceneRoom, pushNotice]
   );
 
-  // Handle ?autostart=1 and ?room=XXXX query params on mount
+  const handleInviteResponse = useCallback((inviteId: string, accept: boolean) => {
+    socketRef.current?.send({ type: 'invite_response', inviteId, accept });
+    setInvites((prev) => prev.filter((i) => i.inviteId !== inviteId));
+  }, []);
+
+  const handleInviteExpire = useCallback((inviteId: string) => {
+    setInvites((prev) => prev.filter((i) => i.inviteId !== inviteId));
+  }, []);
+
+  // Autostart legado (?autostart=1) sem sala
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-    const autostart = params.get('autostart');
-    if (roomParam) {
-      connectToRoom(roomParam.toUpperCase());
-    } else if (autostart === '1') {
-      handleStartAI(true);
-    }
-  }, [connectToRoom, handleStartAI]);
+    if (isAutostart && !readRoomParam()) handleStartAI(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keyboard shortcuts (Enter/Space on title, Esc/P to pause, M to mute)
   useEffect(() => {
@@ -343,6 +651,26 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [screen, handleStartAI]);
 
+  const isSpectator = mode === 'multiplayer' && playerColor === 'spectator';
+
+  /** Envia acao de jogo ao servidor; false se bloqueada (espectador/offline). */
+  const sendGameAction = useCallback(
+    (msg: ClientMessage): boolean => {
+      if (playerColor === 'spectator') {
+        pushNotice('Você está assistindo: espectadores não podem jogar.', 'info');
+        return false;
+      }
+      const sock = socketRef.current;
+      if (!sock || connection !== 'ready') {
+        pushNotice('Sem conexão com o servidor. Reconectando...', 'error');
+        return false;
+      }
+      sock.send(msg);
+      return true;
+    },
+    [playerColor, connection, pushNotice]
+  );
+
   const handleSquareClick = useCallback(
     (pos: Pos) => {
       if (screen !== 'playing' || gameState.draft.phase !== 'playing' || gameState.winner) return;
@@ -361,8 +689,8 @@ export default function App() {
           return;
         }
 
-        if (mode === 'multiplayer' && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'move', move: matchedMove }));
+        if (mode === 'multiplayer') {
+          sendGameAction({ type: 'move', move: matchedMove });
         } else {
           setGameState((prev) => applyMove(prev, matchedMove));
         }
@@ -391,7 +719,7 @@ export default function App() {
         setLegalMoves([]);
       }
     },
-    [screen, gameState, mode, playerColor, legalMoves, selectedSquare]
+    [screen, gameState, mode, playerColor, legalMoves, selectedSquare, sendGameAction]
   );
 
   const handleResolveConvocation = (choice: SpecialId | ClassicKind | 'keep_pawn') => {
@@ -416,8 +744,8 @@ export default function App() {
       setSelectedSquare(null);
       setLegalMoves([]);
       if (targetMove) {
-        if (mode === 'multiplayer' && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'move', move: targetMove }));
+        if (mode === 'multiplayer') {
+          sendGameAction({ type: 'move', move: targetMove });
         } else {
           setGameState((prev) => applyMove(prev, targetMove));
         }
@@ -425,8 +753,8 @@ export default function App() {
       return;
     }
 
-    if (mode === 'multiplayer' && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'convocate', choice }));
+    if (mode === 'multiplayer') {
+      sendGameAction({ type: 'convocate', choice });
     } else {
       setGameState((prev) => resolveConvocation(prev, choice));
     }
@@ -434,11 +762,12 @@ export default function App() {
 
   const handleSendEmote = (emoteId: string) => {
     if (emoteCooldownSec > 0) return;
-    setEmoteCooldownSec(10);
 
-    if (mode === 'multiplayer' && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'emote', emoteId }));
+    if (mode === 'multiplayer') {
+      if (!sendGameAction({ type: 'emote', emoteId })) return;
+      setEmoteCooldownSec(10);
     } else {
+      setEmoteCooldownSec(10);
       const em = MEME_EMOTES.find((e) => e.id === emoteId);
       if (em) {
         soundEngine.playEmote(em.id);
@@ -449,8 +778,8 @@ export default function App() {
   };
 
   const handleResign = () => {
-    if (mode === 'multiplayer' && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'resign' }));
+    if (mode === 'multiplayer') {
+      sendGameAction({ type: 'resign' });
     } else {
       setGameState((prev) => ({
         ...prev,
@@ -462,23 +791,34 @@ export default function App() {
   };
 
   const handleRestart = () => {
-    if (mode === 'multiplayer' && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'rematch' }));
-      setScreen('playing');
+    if (mode === 'multiplayer') {
+      if (isSpectator) {
+        leaveRoom();
+        return;
+      }
+      if (sendGameAction({ type: 'rematch' })) {
+        setMatchEnd(null);
+        setScreen('playing');
+      }
     } else {
       handleStartAI(false);
     }
   };
 
   const handleReturnTitle = () => {
-    wsRef.current?.close();
-    wsRef.current = null;
-    setRoomId(null);
-    window.history.replaceState({}, '', '/');
+    if (mode === 'multiplayer') {
+      leaveRoom();
+      return;
+    }
     setGameState(createInitialState(false));
     setSelectedSquare(null);
     setLegalMoves([]);
     setScreen('title');
+  };
+
+  const openLobby = () => {
+    if (boot.phase === 'error') return;
+    setScreen('lobby');
   };
 
   const showMyConvocation =
@@ -486,6 +826,8 @@ export default function App() {
     (mode === 'ai'
       ? gameState.pendingConvocation.color === 'w'
       : gameState.pendingConvocation.color === playerColor);
+
+  const inAiPlay = mode === 'ai' && screen === 'playing';
 
   return (
     <main className="w-screen h-screen relative overflow-hidden bg-[#070B14]">
@@ -497,7 +839,7 @@ export default function App() {
         playerPerspective={playerColor === 'b' ? 'b' : 'w'}
         cameraPreset={cameraPreset}
         roomId={sceneRoom}
-        isTitleScreen={screen === 'title'}
+        isTitleScreen={screen === 'title' || screen === 'lobby'}
         robotMood={gameState.inCheck ? 'alert' : 'idle'}
         onSquareClick={handleSquareClick}
       />
@@ -508,9 +850,40 @@ export default function App() {
           selectedRoom={sceneRoom}
           onSelectRoom={setSceneRoom}
           onStartAI={() => handleStartAI(false)}
+          onOpenLobby={openLobby}
+          user={me}
+          connection={connection}
+        />
+      )}
+
+      {/* Lobby */}
+      {screen === 'lobby' && me && (
+        <Lobby
+          me={me}
+          online={online}
+          rooms={rooms}
+          connection={connection}
+          challengingUserId={challengingUserId}
+          creatingRoom={isCreatingRoom}
+          sceneRoom={sceneRoom}
+          onSelectSceneRoom={setSceneRoom}
+          onChallenge={handleChallenge}
           onCreateRoom={handleCreateRoom}
-          onJoinRoom={handleJoinRoom}
-          isCreatingRoom={isCreatingRoom}
+          onJoinRoom={(code, asSpectator) => joinRoom(code, asSpectator)}
+          onStartAI={() => handleStartAI(false)}
+          onOpenLeaderboard={() => setLeaderboardOpen(true)}
+          onBack={() => setScreen('title')}
+        />
+      )}
+
+      {/* Barra de sala / espectadores */}
+      {mode === 'multiplayer' && roomId && seats && (screen === 'playing' || screen === 'paused') && (
+        <SpectatorBar
+          roomId={roomId}
+          seats={seats}
+          yourSeat={playerColor}
+          connection={connection}
+          onLeave={leaveRoom}
         />
       )}
 
@@ -522,7 +895,7 @@ export default function App() {
           sceneRoom={sceneRoom}
           playerColor={playerColor}
           roomId={roomId}
-          playersConnected={playersConnected}
+          playersConnected={seats ? (seats.w ? 1 : 0) + (seats.b ? 1 : 0) : 1}
           aiThinking={aiThinking}
           selectedSquare={selectedSquare}
           legalMoves={legalMoves}
@@ -585,6 +958,82 @@ export default function App() {
           onRestart={handleRestart}
           onReturnTitle={handleReturnTitle}
         />
+      )}
+
+      {/* Pontos ganhos ao fim da partida */}
+      {matchEnd && me && mode === 'multiplayer' && (
+        <MatchPointsCard
+          meUserId={me.userId}
+          result={matchEnd.result}
+          reason={matchEnd.reason}
+          points={matchEnd.points}
+          myColor={playerColor}
+          onOpenLeaderboard={() => setLeaderboardOpen(true)}
+          onClose={() => setMatchEnd(null)}
+        />
+      )}
+
+      {leaderboardOpen && me && (
+        <div className="fixed inset-0 z-[70]">
+          <Leaderboard meUserId={me.userId} onClose={() => setLeaderboardOpen(false)} />
+        </div>
+      )}
+
+      {/* Convites e avisos */}
+      <InviteToast
+        invites={invites}
+        notices={notices}
+        onRespond={handleInviteResponse}
+        onExpire={handleInviteExpire}
+        onDismissNotice={(id) => setNotices((prev) => prev.filter((n) => n.id !== id))}
+      />
+
+      {/* Erro de inicializacao (bridge/sessao): amigavel e com nova tentativa */}
+      {boot.phase === 'error' && !inAiPlay && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-[#050811]/90">
+          <div
+            role="alert"
+            className="w-full max-w-sm bg-[#0B1222] border border-slate-700/80 rounded-2xl p-6 text-center shadow-2xl"
+          >
+            <h2 className="font-display font-bold text-lg text-white mb-2">Não foi possível conectar</h2>
+            <p className="text-sm text-slate-300 mb-4">
+              {boot.error instanceof WorkspaceError && boot.error.code === 'login_required'
+                ? 'Entre no Bold Workspace para jogar. Redirecionando para o login...'
+                : (boot.error?.message ?? 'Erro desconhecido.')}
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setBootNonce((n) => n + 1);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-[#00E676] hover:bg-[#00d16b] text-slate-950 font-bold text-sm cursor-pointer"
+              >
+                Tentar de novo
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBoot({ phase: 'loading' });
+                  handleStartAI(false);
+                }}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-sm cursor-pointer"
+              >
+                Jogar contra a IA (offline)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Estado de conexao (nao bloqueia) enquanto joga */}
+      {boot.phase !== 'error' && connection !== 'ready' && screen !== 'title' && screen !== 'lobby' && mode === 'multiplayer' && (
+        <div
+          role="status"
+          className="fixed bottom-2 left-2 z-50 px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs"
+        >
+          {connection === 'closed' ? 'Desconectado' : 'Reconectando ao servidor...'}
+        </div>
       )}
     </main>
   );
