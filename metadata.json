@@ -1,0 +1,8 @@
+{
+  "name": "Xadrez Bold",
+  "description": "Jogo de xadrez 3D da Bold Solution com peças especiais da equipe, convocação tática, IA em Web Worker, multiplayer por link e áudios de meme.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
