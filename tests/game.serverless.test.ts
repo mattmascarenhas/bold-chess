@@ -5,7 +5,7 @@ import type { GameState } from '../src/game/types';
 import { EMPTY_POS, type Pos } from '../src/shared/http-protocol';
 import type { ClientMessage, PlayerIdentity, ServerMessage } from '../src/shared/protocol';
 import type { FinishMatchInput, Leaderboard } from '../server/types';
-import { createPgliteDb, type Db } from '../server/serverless/db';
+import { createPgDb, createPgliteDb, type Db } from '../server/serverless/db';
 import { GAME_SCHEMA } from '../server/serverless/schema';
 import { createGame, type GameOptions } from '../server/serverless/game';
 
@@ -15,8 +15,19 @@ function ident(userId: string, acct: string): PlayerIdentity {
   return { userId, name: userId.toUpperCase(), avatarUrl: null, accountId: `acct-${acct}`, workspaceId: `ws-${acct}` };
 }
 
+/** PGlite por padrao; com TEST_DATABASE_URL roda contra um Postgres real (tabelas do jogo recriadas a cada teste). */
+async function newDb(): Promise<Db> {
+  const url = process.env.TEST_DATABASE_URL;
+  if (!url) return createPgliteDb();
+  const db = createPgDb(url);
+  for (const t of ['chess_events', 'chess_invites', 'chess_members', 'chess_rooms', 'chess_online']) {
+    await db.query('DROP TABLE IF EXISTS ' + t);
+  }
+  return db;
+}
+
 async function setup(options: GameOptions = {}) {
-  const inner = await createPgliteDb();
+  const inner = await newDb();
   // createPgliteDb().query usa o protocolo estendido e rejeita o GAME_SCHEMA (varios comandos): executa-o comando a comando.
   const db: Db = {
     ...inner,
@@ -475,7 +486,7 @@ test('login devolve resumeRoomId e limites de salas', async () => {
 });
 
 test('cliente novo (cursor 0) nao recebe eventos antigos, so recentes', async () => {
-  const db = await createPgliteDb();
+  const db = await newDb();
   const clock = { t: T0 };
   const lb: Leaderboard = { async finishMatch() { return []; } };
   const game = createGame({ db, leaderboard: lb, now: () => clock.t });
