@@ -464,7 +464,6 @@ export function GameHUD({
                       <span className="font-display font-bold text-sm text-white">
                         {sp.name}
                       </span>
-                      <span className="text-xs text-slate-400">({sp.person})</span>
                     </div>
                     <p className="text-xs text-slate-300 mt-0.5">{sp.movementSummary}</p>
                     <p className="text-xs text-[#00E5C3] mt-1">

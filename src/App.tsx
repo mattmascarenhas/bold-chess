@@ -11,7 +11,7 @@ import { TitleOverlay } from './components/TitleOverlay';
 import {
   applyMove,
   createInitialState,
-  getAvailableSquadSpecials,
+  getConvocationOffer,
   getLegalMoves,
   resolveConvocation,
 } from './game/engine';
@@ -940,7 +940,7 @@ export default function App() {
                   color: c,
                   pos: pendingPromotionDest,
                   isLastRank: true,
-                  availableSpecials: getAvailableSquadSpecials(gameState, c),
+                  availableSpecials: getConvocationOffer(gameState, c),
                 }}
                 usedCount={gameState.usedSpecials[c].length}
                 onResolve={handleResolveConvocation}

@@ -196,6 +196,38 @@ export function hasActiveFriendlySpecial(state: GameState, color: Color): boolea
   return false;
 }
 
+/** Quantas pecas especiais sao oferecidas por convocacao/promocao. */
+export const CONVOCATION_OFFER_SIZE = 3;
+
+function hashSeed(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Oferta deterministica de ate 3 especiais para o jogador na posicao atual.
+ * Deterministica (semente = estado) para cliente, motor e servidor concordarem
+ * sem guardar estado extra; muda a cada jogada.
+ */
+export function getConvocationOffer(state: GameState, color: Color): SpecialId[] {
+  const avail = getAvailableSquadSpecials(state, color);
+  if (avail.length <= CONVOCATION_OFFER_SIZE) return avail;
+  let seed = hashSeed(
+    `${color}|${state.history.length}|${state.fullMoveNumber}|${state.usedSpecials[color].join(',')}`
+  );
+  const pool = [...avail];
+  const out: SpecialId[] = [];
+  while (out.length < CONVOCATION_OFFER_SIZE && pool.length > 0) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    out.push(pool.splice(seed % pool.length, 1)[0]);
+  }
+  return out;
+}
+
 export function getAvailableSquadSpecials(state: GameState, color: Color): SpecialId[] {
   if (hasActiveFriendlySpecial(state, color)) return [];
   const used = state.usedSpecials[color];
@@ -880,7 +912,7 @@ function applyMoveRaw(state: GameState, move: MoveOption): GameState {
       color,
       pos: { ...move.to },
       isLastRank: false,
-      availableSpecials: getAvailableSquadSpecials(next, color),
+      availableSpecials: getConvocationOffer(next, color),
     };
     // Do NOT advance turn yet until convocation choice is resolved!
     next.inCheck = isKingInCheck(next, opp) ? opp : null;
@@ -893,7 +925,7 @@ function applyMoveRaw(state: GameState, move: MoveOption): GameState {
       color,
       pos: { ...move.to },
       isLastRank: true,
-      availableSpecials: getAvailableSquadSpecials(next, color),
+      availableSpecials: getConvocationOffer(next, color),
     };
     next.inCheck = isKingInCheck(next, opp) ? opp : null;
     return next;
@@ -1128,7 +1160,7 @@ export function getLegalMoves(state: GameState, from: Pos): MoveOption[] {
   // Also allow promotion to Special Piece on 8th rank if eligible
   const promoRow = piece.color === 'w' ? 0 : 7;
   if (piece.kind === 'p') {
-    const avail = getAvailableSquadSpecials(state, piece.color);
+    const avail = getConvocationOffer(state, piece.color);
     if (avail.length > 0) {
       const existingPromos = pseudo.filter((m) => m.kind === 'promotion' && m.promoteTo === 'q');
       for (const basePromo of existingPromos) {

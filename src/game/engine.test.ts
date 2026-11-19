@@ -5,6 +5,7 @@ import {
   chooseBestAIMove,
   createInitialState,
   draftPick,
+  getConvocationOffer,
   getLegalMoves,
   isKingInCheck,
   resolveConvocation,
@@ -217,16 +218,17 @@ test('UIU slides minimum 3 squares in 8 directions', () => {
   assert.ok(moves.some((m) => m.to.row === 3 && m.to.col === 3));
 });
 
-test('6th rank convocation allows choosing from 10 specials up to 3 times per match', () => {
+test('6th rank convocation offers 3 of the specials, up to 3 picks per match', () => {
   const s = emptyPlayableState();
   place(s, 3, 2, { color: 'w', kind: 'p' });
   const s2 = applyMove(s, { kind: 'move', from: { row: 3, col: 2 }, to: { row: 2, col: 2 } });
   assert.ok(s2.pendingConvocation);
   assert.equal(s2.pendingConvocation?.isLastRank, false);
-  assert.equal(s2.pendingConvocation?.availableSpecials.length, 10);
+  assert.equal(s2.pendingConvocation?.availableSpecials.length, 3);
+  const picked = s2.pendingConvocation!.availableSpecials[0];
 
-  const s3 = resolveConvocation(s2, 'gabigol');
-  assert.equal(s3.board[2][2]?.kind, 'gabigol');
+  const s3 = resolveConvocation(s2, picked);
+  assert.equal(s3.board[2][2]?.kind, picked);
   assert.equal(s3.usedSpecials.w.length, 1);
   assert.equal(s3.pendingConvocation, null);
   assert.equal(s3.turn, 'b');
@@ -308,4 +310,32 @@ test('Declares draw on threefold repetition and 50-move rule', () => {
   const after50 = applyMove(s50, { kind: 'move', from: { row: 7, col: 4 }, to: { row: 7, col: 3 } });
   assert.equal(after50.winner, 'draw');
   assert.equal(after50.endReason, 'fifty_move');
+});
+
+test('convocation offer is exactly 3 distinct specials, deterministic, and enforced', () => {
+  const s = emptyPlayableState();
+  const a = getConvocationOffer(s, 'w');
+  const b = getConvocationOffer(s, 'w');
+  assert.equal(a.length, 3);
+  assert.equal(new Set(a).size, 3);
+  assert.deepEqual(a, b);
+
+  // Special outside the offer cannot be chosen
+  place(s, 3, 2, { color: 'w', kind: 'p' });
+  const s2 = applyMove(s, { kind: 'move', from: { row: 3, col: 2 }, to: { row: 2, col: 2 } });
+  const offer = s2.pendingConvocation!.availableSpecials;
+  const outside = (['gabigol','salles','hbarril','pm','ministro','vitin','marcola','eminnym','jac','uiu'] as const).find((id) => !offer.includes(id))!;
+  assert.equal(resolveConvocation(s2, outside), s2);
+
+  // 8th-rank promotion moves only exist for offered specials
+  const p = emptyPlayableState();
+  place(p, 1, 2, { color: 'w', kind: 'p' });
+  const promoOffer = getConvocationOffer(p, 'w');
+  const promoKinds = getLegalMoves(p, { row: 1, col: 2 })
+    .filter((m) => m.kind === 'promotion')
+    .map((m) => m.promoteTo);
+  for (const sp of promoKinds) {
+    if (sp !== 'q' && sp !== 'r' && sp !== 'b' && sp !== 'n') assert.ok(promoOffer.includes(sp as any));
+  }
+  assert.ok(promoKinds.filter((k) => !['q', 'r', 'b', 'n'].includes(k as string)).length <= 3);
 });
