@@ -33,3 +33,23 @@ test('PgStore: partida, agregados, ranking e par do dia', { skip: !url }, async 
     await store.close();
   }
 });
+
+test('PgStore: partida contra a IA pontua so o humano e conta o dia', { skip: !url }, async () => {
+  const store = createPgStore(url!);
+  const u = 't' + Date.now() + '_ai';
+  try {
+    const ai = { userId: 'ai:deus', name: 'IA Modo Deus', avatarUrl: null, accountId: null, workspaceId: null };
+    const mk = (id: string, delta: number, result: 'w' | 'b', counted = true) => ({
+      id, roomId: 'ia', white: idn(u, 'Humano'), black: ai, result, reason: 'checkmate', moves: 20, counted, whiteDelta: delta, blackDelta: 0, endedAt: Date.now(),
+    });
+    await store.recordMatch(mk(u + '1', 80, 'w'));
+    await store.recordMatch(mk(u + '2', 5, 'b'));
+    await store.recordMatch(mk(u + '3', 0, 'w', false));
+    const s = await store.getStats(u);
+    assert.deepEqual({ p: s?.points, w: s?.wins, l: s?.losses }, { p: 85, w: 1, l: 1 });
+    assert.equal(await store.getStats('ai:deus'), null); // IA nunca entra no ranking
+    assert.deepEqual(await store.countAiToday(u), { games: 2, points: 85 }); // so as pontuadas
+  } finally {
+    await store.close();
+  }
+});

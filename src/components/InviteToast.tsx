@@ -149,6 +149,7 @@ export function MatchPointsCard({
   reason,
   points,
   myColor,
+  vsAiLabel,
   onOpenLeaderboard,
   onClose,
 }: {
@@ -157,6 +158,8 @@ export function MatchPointsCard({
   reason: string;
   points: PointsAward[];
   myColor: 'w' | 'b' | 'spectator';
+  /** nivel da IA, quando a partida foi contra o computador */
+  vsAiLabel?: string;
   onOpenLeaderboard: () => void;
   onClose: () => void;
 }) {
@@ -179,7 +182,9 @@ export function MatchPointsCard({
         ? 'Partida curta demais para pontuar (mínimo de 10 jogadas).'
         : mine.reason === 'pair_limit'
           ? 'Limite diário de partidas pontuadas contra este jogador atingido.'
-          : 'Esta partida não conta para o ranking.';
+          : mine.reason === 'daily_limit'
+            ? 'Limite diário de partidas pontuadas contra a IA atingido.'
+            : 'Esta partida não conta para o ranking.';
   } else detail = `Total: ${mine.total} pontos`;
 
   return (
@@ -196,6 +201,7 @@ export function MatchPointsCard({
         <X className="w-4 h-4" />
       </button>
       <div className="text-xs text-slate-300">
+        {vsAiLabel ? `Contra a IA (${vsAiLabel}) · ` : ''}
         {outcome} <span className="text-slate-500">· {reason}</span>
       </div>
       {mine && mine.counted && (

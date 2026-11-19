@@ -24,6 +24,9 @@ class AuthFail extends Error {
 
 const finished: FinishMatchInput[] = [];
 const fakeLeaderboard: Leaderboard = {
+  async finishAiMatch(input) {
+    return { userId: input.user.userId, delta: 0, total: 0, counted: false };
+  },
   async finishMatch(input) {
     finished.push(input);
     const awards: PointsAward[] = [input.white, input.black].map((p) => ({

@@ -34,6 +34,8 @@ export interface Store {
   getRank(userId: string): Promise<number | null>;
   /** Partidas PONTUADAS hoje (dia local do servidor) entre os dois, em qualquer ordem de cor. */
   countPairToday(userA: string, userB: string): Promise<number>;
+  /** Partidas e pontos de hoje (dia local) do usuario contra a IA, so as pontuadas. */
+  countAiToday(userId: string): Promise<{ games: number; points: number }>;
   recentMatches(limit: number): Promise<MatchRecord[]>;
 }
 
@@ -47,7 +49,18 @@ export interface FinishMatchInput {
   moves: number;
 }
 
+export interface FinishAiMatchInput {
+  user: PlayerIdentity;
+  level: string;
+  /** do ponto de vista do jogador humano */
+  outcome: 'win' | 'draw' | 'loss';
+  reason: string;
+  moves: number;
+}
+
 export interface Leaderboard {
+  /** Pontua uma partida contra a IA (ja conferida) e grava. Nunca lanca. */
+  finishAiMatch(input: FinishAiMatchInput): Promise<PointsAward>;
   /** Calcula pontos (src/shared/scoring.ts), grava no Store e devolve os premios. Nunca lanca por falha de IA/jogador ausente: devolve counted=false. */
   finishMatch(input: FinishMatchInput): Promise<PointsAward[]>;
 }

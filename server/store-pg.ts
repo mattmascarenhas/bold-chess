@@ -104,6 +104,7 @@ export class PgStore implements Store {
       const sides: Array<['white' | 'black', 'w' | 'b']> = [['white', 'w'], ['black', 'b']];
       for (const [side, col] of sides) {
         const p = rec[side];
+        if (p.userId.startsWith('ai:')) continue; // IA nao entra no ranking
         const counted = rec.counted;
         const delta = side === 'white' ? rec.whiteDelta : rec.blackDelta;
         const win = counted && rec.result === col ? 1 : 0;
@@ -174,6 +175,16 @@ export class PgStore implements Store {
       [userA, userB, startOfLocalDay()],
     );
     return r.rows[0].n;
+  }
+
+  async countAiToday(userId: string): Promise<{ games: number; points: number }> {
+    await this.ready;
+    const r = await this.pool.query(
+      `SELECT COUNT(*)::int AS games, COALESCE(SUM(white_delta), 0)::int AS points FROM chess_matches
+       WHERE counted = TRUE AND white_id = $1 AND black_id LIKE 'ai:%' AND ended_at >= $2`,
+      [userId, startOfLocalDay()],
+    );
+    return { games: r.rows[0].games, points: r.rows[0].points };
   }
 
   async recentMatches(limit: number): Promise<MatchRecord[]> {

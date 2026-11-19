@@ -1,8 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type express from 'express';
 import type { PlayerIdentity, PointsAward } from '../src/shared/protocol';
-import { computeScore } from '../src/shared/scoring';
-import type { FinishMatchInput, Leaderboard, MatchRecord, Store } from './types';
+import { AI_POINTS, computeAiScore, computeScore, isAiLevel } from '../src/shared/scoring';
+import type { FinishAiMatchInput, FinishMatchInput, Leaderboard, MatchRecord, Store } from './types';
+
+const AI_LABEL: Record<keyof typeof AI_POINTS, string> = {
+  facil: 'Fácil',
+  medio: 'Médio',
+  dificil: 'Difícil',
+  mestre: 'Mestre',
+  deus: 'Modo Deus',
+};
 
 function noCount(input: FinishMatchInput, reason: PointsAward['reason']): PointsAward[] {
   const ids = [input.white?.userId, input.black?.userId].filter((x): x is string => !!x);
@@ -11,6 +19,41 @@ function noCount(input: FinishMatchInput, reason: PointsAward['reason']): Points
 
 export function createLeaderboard(store: Store): Leaderboard {
   return {
+    async finishAiMatch(input: FinishAiMatchInput): Promise<PointsAward> {
+      const { user } = input;
+      const none = (reason: PointsAward['reason']): PointsAward => ({ userId: user.userId, delta: 0, total: 0, counted: false, reason });
+      if (!isAiLevel(input.level)) return none('unverified');
+      try {
+        const [stats, today] = await Promise.all([store.getStats(user.userId), store.countAiToday(user.userId)]);
+        const score = computeAiScore({
+          level: input.level,
+          outcome: input.outcome,
+          moves: input.moves,
+          gamesToday: today.games,
+          pointsToday: today.points,
+        });
+        const result: MatchRecord['result'] = input.outcome === 'win' ? 'w' : input.outcome === 'loss' ? 'b' : 'draw';
+        await store.recordMatch({
+          id: randomUUID(),
+          roomId: 'ia',
+          white: user,
+          black: { userId: `ai:${input.level}`, name: `IA ${AI_LABEL[input.level]}`, avatarUrl: null, accountId: null, workspaceId: null },
+          result,
+          reason: input.reason,
+          moves: input.moves,
+          counted: score.counted,
+          whiteDelta: score.delta,
+          blackDelta: 0,
+          endedAt: Date.now(),
+        });
+        const before = stats?.points ?? 0;
+        return { userId: user.userId, delta: score.delta, total: before + score.delta, counted: score.counted, reason: score.reason };
+      } catch (err) {
+        console.error('[leaderboard] finishAiMatch falhou:', err);
+        return none(undefined);
+      }
+    },
+
     async finishMatch(input: FinishMatchInput): Promise<PointsAward[]> {
       const { white, black } = input;
       if (!white || !black) return noCount(input, 'vs_ai');

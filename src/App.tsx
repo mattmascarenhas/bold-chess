@@ -4,6 +4,7 @@ import { ConvocationModal } from './components/ConvocationModal';
 import { GameHUD } from './components/GameHUD';
 import { GameSetupModal, loadLastAILevel } from './components/GameSetupModal';
 import { AIDifficulty, getAILevel } from './game/ai';
+import type { AiAction } from './shared/protocol';
 import { SidePanel } from './components/SidePanel';
 import { TurnBanner, TurnGlow } from './components/TurnBanner';
 import { InviteToast, MatchPointsCard, inviteResultText, type IncomingInvite, type Notice } from './components/InviteToast';
@@ -71,6 +72,24 @@ interface MatchEndInfo {
   result: MatchResult;
   reason: string;
   points: PointsAward[];
+  /** 'ia' = partida contra o computador */
+  roomId?: string;
+}
+
+/** Acoes compactas da partida contra a IA, enviadas ao servidor no fim para conferir e pontuar. */
+function aiMoveAction(m: MoveOption, st: GameState): AiAction {
+  return {
+    k: 'm',
+    f: [m.from.row, m.from.col],
+    t: [m.to.row, m.to.col],
+    d: m.kind,
+    ...(m.promoteTo ? { p: m.promoteTo } : {}),
+    ...(st.offerSeed !== undefined ? { s: st.offerSeed } : {}),
+  };
+}
+
+function aiConvAction(choice: string, st: GameState): AiAction {
+  return { k: 'c', c: choice, ...(st.pendingConvocation ? { o: [...st.pendingConvocation.availableSpecials] } : {}) };
 }
 
 const ERROR_TEXT: Partial<Record<ErrorCode, string>> = {
@@ -130,6 +149,9 @@ export default function App() {
   const aiLevelRef = useRef<AIDifficulty>(loadLastAILevel());
   /** estado para o qual ja pedimos jogada a IA (evita pedir de novo ao pausar/retomar) */
   const aiAskedRef = useRef<GameState | null>(null);
+  /** acoes da partida atual contra a IA e se o resultado ja foi enviado */
+  const aiLogRef = useRef<AiAction[]>([]);
+  const aiSubmittedRef = useRef(false);
   const [aiLevelLabel, setAiLevelLabel] = useState<string>(getAILevel(aiLevelRef.current).label);
   const pausedAtRef = useRef<number | null>(null);
 
@@ -244,6 +266,7 @@ export default function App() {
       setAiThinking(false);
 
       if (nextState) {
+        if (convocationChoice) aiLogRef.current.push(aiConvAction(convocationChoice, gameStateRef.current));
         setGameState((prev) => stampMove(prev, nextState, Date.now()));
         if (convocationChoice && convocationChoice !== 'keep_pawn' && convocationChoice in SPECIAL_BY_ID) {
           const sp = SPECIAL_BY_ID[convocationChoice as SpecialId];
@@ -255,6 +278,7 @@ export default function App() {
       }
 
       if (move) {
+        aiLogRef.current.push(aiMoveAction(move, gameStateRef.current));
         setGameState((prev) => stampMove(prev, applyMove(prev, move), Date.now()));
       }
     };
@@ -399,6 +423,23 @@ export default function App() {
       }
     }
   }, [screen, mode]);
+
+  // Fim da partida contra a IA: envia as acoes ao servidor, que confere os lances e pontua pelo nivel
+  useEffect(() => {
+    if (mode !== 'ai' || !gameState.winner || aiSubmittedRef.current) return;
+    if (aiLogRef.current.length === 0) return;
+    // IA estourou o tempo: nao da para conferir pelos lances
+    if (gameState.endReason === 'timeout' && gameState.winner === 'w') return;
+    const sock = socketRef.current;
+    if (!sock || connection !== 'ready') {
+      pushNotice('Sem conexão: esta partida contra a IA não foi registrada no ranking.', 'error');
+      aiSubmittedRef.current = true;
+      return;
+    }
+    aiSubmittedRef.current = true;
+    const outcome = gameState.endReason === 'resign' ? 'resign' : gameState.endReason === 'timeout' ? 'timeout' : undefined;
+    sock.send({ type: 'ai_match', level: aiLevelRef.current, actions: aiLogRef.current, outcome });
+  }, [mode, gameState.winner, gameState.endReason, connection, pushNotice]);
 
   // A selecao de inspecao some quando o jogo anda
   useEffect(() => {
@@ -602,7 +643,7 @@ export default function App() {
         });
 
         socket.on('match_ended', (msg) => {
-          setMatchEnd({ result: msg.result, reason: msg.reason, points: msg.points });
+          setMatchEnd({ result: msg.result, reason: msg.reason, points: msg.points, roomId: msg.roomId });
         });
 
         socket.on('error', (msg) => {
@@ -670,6 +711,8 @@ export default function App() {
       setAiLevelLabel(getAILevel(level).label);
     }
     aiAskedRef.current = null;
+    aiLogRef.current = [];
+    aiSubmittedRef.current = false;
     aiReqIdRef.current += 1; // descarta qualquer resposta pendente da partida anterior
     if (roomIdRef.current) socketRef.current?.send({ type: 'leave' });
     roomIdRef.current = null;
@@ -798,6 +841,7 @@ export default function App() {
         if (mode === 'multiplayer') {
           sendGameAction({ type: 'move', move: matchedMove });
         } else {
+          aiLogRef.current.push(aiMoveAction(matchedMove, gameState));
           setGameState((prev) => stampMove(prev, applyMove(prev, matchedMove), Date.now()));
         }
         setSelectedSquare(null);
@@ -857,6 +901,7 @@ export default function App() {
         if (mode === 'multiplayer') {
           sendGameAction({ type: 'move', move: targetMove });
         } else {
+          aiLogRef.current.push(aiMoveAction(targetMove, gameState));
           setGameState((prev) => stampMove(prev, applyMove(prev, targetMove), Date.now()));
         }
       }
@@ -866,6 +911,7 @@ export default function App() {
     if (mode === 'multiplayer') {
       sendGameAction({ type: 'convocate', choice });
     } else {
+      aiLogRef.current.push(aiConvAction(choice, gameState));
       setGameState((prev) => stampMove(prev, resolveConvocation(prev, choice), Date.now()));
     }
   };
@@ -1144,13 +1190,14 @@ export default function App() {
       )}
 
       {/* Pontos ganhos ao fim da partida */}
-      {matchEnd && me && mode === 'multiplayer' && (
+      {matchEnd && me && (mode === 'multiplayer' || matchEnd.roomId === 'ia') && (
         <MatchPointsCard
           meUserId={me.userId}
           result={matchEnd.result}
           reason={matchEnd.reason}
           points={matchEnd.points}
-          myColor={playerColor}
+          myColor={mode === 'ai' ? 'w' : playerColor}
+          vsAiLabel={matchEnd.roomId === 'ia' ? aiLevelLabel : undefined}
           onOpenLeaderboard={() => setLeaderboardOpen(true)}
           onClose={() => setMatchEnd(null)}
         />

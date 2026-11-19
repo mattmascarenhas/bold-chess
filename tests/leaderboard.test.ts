@@ -34,6 +34,10 @@ function fakeStore(opts: { pairToday?: number; fail?: boolean } = {}) {
         stats.set(p.userId, s);
       }
     },
+    async countAiToday(userId) {
+      const mine = matches.filter((m) => m.counted && m.white.userId === userId && m.black.userId.startsWith('ai:'));
+      return { games: mine.length, points: mine.reduce((a, m) => a + m.whiteDelta, 0) };
+    },
     async getStats(id) {
       if (opts.fail) throw new Error('boom');
       return stats.get(id) ?? null;

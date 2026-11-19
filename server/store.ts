@@ -17,6 +17,8 @@ function localDay(ts: number): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
+const isAi = (id: string) => id.startsWith('ai:');
+
 function touch(users: Record<string, PlayerStats>, p: MatchRecord['white']): PlayerStats {
   const cur = (Object.hasOwn(users, p.userId) ? users[p.userId] : undefined) ?? { userId: p.userId, name: p.name, avatarUrl: null, points: 0, wins: 0, losses: 0, draws: 0 };
   cur.name = p.name;
@@ -26,14 +28,15 @@ function touch(users: Record<string, PlayerStats>, p: MatchRecord['white']): Pla
 }
 
 function apply(data: Data, rec: MatchRecord): void {
-  const w = touch(data.users, rec.white);
-  const b = touch(data.users, rec.black);
+  // O adversario IA (ai:<nivel>) nunca entra no ranking: so a partida e gravada.
+  const w = isAi(rec.white.userId) ? null : touch(data.users, rec.white);
+  const b = isAi(rec.black.userId) ? null : touch(data.users, rec.black);
   if (rec.counted) {
-    w.points += rec.whiteDelta;
-    b.points += rec.blackDelta;
-    if (rec.result === 'w') { w.wins++; b.losses++; }
-    else if (rec.result === 'b') { b.wins++; w.losses++; }
-    else { w.draws++; b.draws++; }
+    if (w) w.points += rec.whiteDelta;
+    if (b) b.points += rec.blackDelta;
+    if (rec.result === 'w') { if (w) w.wins++; if (b) b.losses++; }
+    else if (rec.result === 'b') { if (b) b.wins++; if (w) w.losses++; }
+    else { if (w) w.draws++; if (b) b.draws++; }
   }
   data.matches.push(rec);
   if (data.matches.length > MAX_MATCHES) data.matches.splice(0, data.matches.length - MAX_MATCHES);
@@ -91,6 +94,20 @@ class BaseStore implements Store {
         localDay(m.endedAt) === today &&
         ((m.white.userId === userA && m.black.userId === userB) || (m.white.userId === userB && m.black.userId === userA)),
     ).length;
+  }
+
+  async countAiToday(userId: string): Promise<{ games: number; points: number }> {
+    await this.idle();
+    const today = localDay(Date.now());
+    let games = 0;
+    let points = 0;
+    for (const m of this.data.matches) {
+      if (m.counted && isAi(m.black.userId) && m.white.userId === userId && localDay(m.endedAt) === today) {
+        games++;
+        points += m.whiteDelta;
+      }
+    }
+    return { games, points };
   }
 
   async recentMatches(limit: number): Promise<MatchRecord[]> {

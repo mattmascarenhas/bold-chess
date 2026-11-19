@@ -64,7 +64,13 @@ export type ClientMessage =
   | { type: 'resign' }
   | { type: 'rematch' }
   | { type: 'emote'; emoteId: string }
+  | { type: 'ai_match'; level: string; actions: AiAction[]; outcome?: 'resign' | 'timeout' }
   | { type: 'ping' };
+
+/** Acao de uma partida contra a IA (jogador = brancas). Enviada ao fim da partida para conferencia e pontuacao. */
+export type AiAction =
+  | { k: 'm'; f: [number, number]; t: [number, number]; d: string; p?: string; s?: number }
+  | { k: 'c'; c: string; o?: string[] };
 
 // ---------- Servidor -> Cliente ----------
 export type ServerMessage =
@@ -96,7 +102,7 @@ export interface PointsAward {
   delta: number;
   total: number;
   counted: boolean;
-  reason?: 'too_short' | 'pair_limit' | 'vs_ai' | 'same_user';
+  reason?: 'too_short' | 'pair_limit' | 'vs_ai' | 'same_user' | 'daily_limit' | 'unverified';
 }
 
 export type AuthErrorCode = 'invalid_token' | 'expired_token' | 'auth_unavailable';

@@ -4,7 +4,7 @@ import { chooseBestAIMove } from '../src/game/engine';
 import type { GameState } from '../src/game/types';
 import { EMPTY_POS, type Pos } from '../src/shared/http-protocol';
 import type { ClientMessage, PlayerIdentity, ServerMessage } from '../src/shared/protocol';
-import type { FinishMatchInput, Leaderboard } from '../server/types';
+import type { FinishAiMatchInput, FinishMatchInput, Leaderboard } from '../server/types';
 import { createPgDb, createPgliteDb, type Db } from '../server/serverless/db';
 import { GAME_SCHEMA } from '../server/serverless/schema';
 import { createGame, type GameOptions } from '../server/serverless/game';
@@ -41,7 +41,12 @@ async function setup(options: GameOptions = {}) {
   };
   const clock = { t: T0 };
   const calls: FinishMatchInput[] = [];
+  const aiCalls: FinishAiMatchInput[] = [];
   const lb: Leaderboard = {
+    async finishAiMatch(input) {
+      aiCalls.push(input);
+      return { userId: input.user.userId, delta: 7, total: 7, counted: true };
+    },
     async finishMatch(input) {
       calls.push(input);
       return [input.white, input.black].map((p) => ({ userId: p!.userId, delta: 10, total: 10, counted: true }));
@@ -90,7 +95,7 @@ async function setup(options: GameOptions = {}) {
     await c.login();
     return c;
   };
-  return { db, clock, calls, game, mk };
+  return { db, clock, calls, aiCalls, game, mk };
 }
 type Env = Awaited<ReturnType<typeof setup>>;
 type C = Awaited<ReturnType<Env['mk']>>;
@@ -488,7 +493,7 @@ test('login devolve resumeRoomId e limites de salas', async () => {
 test('cliente novo (cursor 0) nao recebe eventos antigos, so recentes', async () => {
   const db = await newDb();
   const clock = { t: T0 };
-  const lb: Leaderboard = { async finishMatch() { return []; } };
+  const lb: Leaderboard = { async finishMatch() { return []; }, async finishAiMatch(i) { return { userId: i.user.userId, delta: 0, total: 0, counted: false }; } };
   const game = createGame({ db, leaderboard: lb, now: () => clock.t });
   const me = ident('u1', 'a');
   await game.login(me); // cria o esquema
@@ -627,5 +632,34 @@ test('relogio: revanche mantem o controle de tempo e reinicia o relogio', async 
   assert.equal(bruno.state!.clock!.incrementMs, 1_000);
   assert.deepEqual(bruno.state!.clock!.remaining, { w: 60_000, b: 60_000 });
   assert.equal(bruno.state!.clock!.turnStartedAt, e.clock.t);
+  await e.db.close();
+});
+
+// ---------- partida contra a IA ----------
+test('ai_match: confere os lances, pontua pelo nivel e devolve match_ended', async () => {
+  const e = await setup();
+  const ana = await e.mk('ana');
+  const mv = (f: [number, number], t: [number, number]) => ({ k: 'm' as const, f, t, d: 'move' });
+  const win = [mv([6, 4], [4, 4]), mv([1, 5], [2, 5]), mv([6, 3], [4, 3]), mv([1, 6], [3, 6]), mv([7, 3], [3, 7])];
+  const ms = await ana.send({ type: 'ai_match', level: 'deus', actions: win });
+  const end = ms.find((m) => m.type === 'match_ended') as Extract<ServerMessage, { type: 'match_ended' }>;
+  assert.ok(end, 'deveria devolver match_ended');
+  assert.equal(end.roomId, 'ia');
+  assert.equal(end.result, 'w');
+  assert.equal(end.points[0].userId, 'ana');
+  assert.equal(e.aiCalls.length, 1);
+  assert.deepEqual({ l: e.aiCalls[0].level, o: e.aiCalls[0].outcome, mv: e.aiCalls[0].moves }, { l: 'deus', o: 'win', mv: 2 });
+  assert.equal(e.aiCalls[0].user.userId, 'ana');
+  await e.db.close();
+});
+
+test('ai_match: partida forjada (lance ilegal ou sem fim) e recusada e nao pontua', async () => {
+  const e = await setup();
+  const ana = await e.mk('ana');
+  const bad = await ana.send({ type: 'ai_match', level: 'deus', actions: [{ k: 'm', f: [6, 4], t: [2, 4], d: 'move' }] });
+  assert.equal(errorOf(bad)?.code, 'bad_request');
+  const noEnd = await ana.send({ type: 'ai_match', level: 'deus', actions: [{ k: 'm', f: [6, 4], t: [4, 4], d: 'move' }] });
+  assert.equal(errorOf(noEnd)?.code, 'bad_request');
+  assert.equal(e.aiCalls.length, 0);
   await e.db.close();
 });

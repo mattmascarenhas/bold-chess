@@ -48,6 +48,7 @@ import {
 import type { FinishMatchInput, Leaderboard } from '../types';
 import type { Db, Queryable } from './db';
 import { ensureSchema } from './schema';
+import { verifyAiGame } from './aiMatch';
 
 export interface GameOptions {
   inviteTtlMs?: number;
@@ -655,6 +656,26 @@ export function createGame(deps: GameDeps): Game {
       case 'ping':
         out.imm.push({ type: 'pong' });
         return;
+      case 'ai_match': {
+        // Partida contra a IA jogada no navegador: confere os lances e pontua pelo nivel.
+        const v = verifyAiGame(msg.actions, msg.outcome);
+        if (!v.ok) return fail(out, 'bad_request', `ai_match_${v.why}`);
+        const award = await leaderboard.finishAiMatch({
+          user: me,
+          level: String(msg.level),
+          outcome: v.outcome,
+          reason: v.reason,
+          moves: v.moves,
+        });
+        out.imm.push({
+          type: 'match_ended',
+          roomId: 'ia',
+          result: v.outcome === 'win' ? 'w' : v.outcome === 'loss' ? 'b' : 'draw',
+          reason: v.reason,
+          points: [award],
+        });
+        return;
+      }
       case 'lobby_list':
         return;
       case 'create_room': {
