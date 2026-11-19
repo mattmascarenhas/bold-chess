@@ -75,6 +75,21 @@ test('payload sem id e invalido', async () => {
   await assert.rejects(v('t'), code('invalid_token'));
 });
 
-test('token real sem credenciais nem verifier', async () => {
-  await assert.rejects(createVerifyToken({ env: { NODE_ENV: 'production' } })('jwt'), code('auth_unavailable'));
+test('token real sem credenciais: modo real ativo (sem auth_unavailable por falta de credencial)', async () => {
+  const v = createVerifyToken({
+    env: { NODE_ENV: 'production' },
+    verifier: async () => ({ id: 'U1', name: 'Ana' }),
+  });
+  assert.equal((await v('jwt')).userId, 'U1');
+});
+
+test('dev: VERCEL sem flag rejeita; com flag aceita; com credenciais rejeita mesmo com flag', async () => {
+  await assert.rejects(createVerifyToken({ env: { VERCEL: '1' } })('dev:u1:Ana'), code('invalid_token'));
+  assert.equal((await createVerifyToken({ env: { VERCEL: '1', ALLOW_DEV_AUTH: '1' } })('dev:u1:Ana')).userId, 'u1');
+  const withCreds = createVerifyToken({ env: { VERCEL: '1', ALLOW_DEV_AUTH: '1', BOLD_CLIENT_ID: 'a', BOLD_CLIENT_SECRET: 'b' } });
+  await assert.rejects(withCreds('dev:u1:Ana'), code('invalid_token'));
+});
+
+test('sem NODE_ENV/credenciais/VERCEL: dev aceito', async () => {
+  assert.equal((await createVerifyToken({ env: {} })('dev:u1:Ana')).userId, 'u1');
 });

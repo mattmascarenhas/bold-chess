@@ -6,6 +6,11 @@ function base(): string {
   return raw ? raw.replace(/\/+$/, '') : '';
 }
 
+/** Base HTTP do servidor (polling). Vazio => mesma origem. */
+export function httpBase(): string {
+  return base();
+}
+
 export function apiUrl(path: string): string {
   return `${base()}${path}`;
 }

@@ -72,22 +72,29 @@ function mapPayload(p: SsoPayload): PlayerIdentity {
 
 export function createVerifyToken(opts: VerifyTokenOptions = {}): VerifyToken {
   const env = opts.env ?? process.env;
-  const clientId = env.BOLD_CLIENT_ID || '';
-  const clientSecret = env.BOLD_CLIENT_SECRET || '';
+  // Credenciais sao OPCIONAIS: o modo real fica sempre ativo e so envia o que existir.
+  const clientId = env.BOLD_CLIENT_ID || undefined;
+  const clientSecret = env.BOLD_CLIENT_SECRET || undefined;
   const hasCreds = !!(clientId && clientSecret);
-  const isProd = env.NODE_ENV === 'production';
+  const prodLike = env.NODE_ENV === 'production' || !!env.VERCEL;
   const allowDevFlag = env.ALLOW_DEV_AUTH === '1';
-  // Producao: dev so se NAO houver credenciais reais E a flag estiver ligada (nunca com credenciais).
-  const devEnabled = isProd ? !hasCreds && allowDevFlag : hasCreds ? allowDevFlag : true;
+  // Tokens `dev:` (identidade sem verificacao):
+  // - producao/Vercel COM credenciais reais: nunca, mesmo com ALLOW_DEV_AUTH=1 (seguranca);
+  // - ALLOW_DEV_AUTH=1 explicito: aceito (dev/E2E/preview sem credenciais);
+  // - sem flag: so fora de producao/Vercel e sem credenciais reais.
+  const devEnabled = prodLike && hasCreds ? false : allowDevFlag || (!prodLike && !hasCreds);
 
   let verifier = opts.verifier;
-  if (!verifier && hasCreds) {
-    const sso = new BoldIframeSSOToken({
-      boldBaseUrl: env.BOLD_BASE_URL || 'https://app.boldworkspace.com.br',
-      clientId,
-      clientSecret,
-    });
-    verifier = (t) => sso.verify(t) as unknown as Promise<SsoPayload>;
+  let sso: BoldIframeSSOToken | null = null;
+  if (!verifier) {
+    verifier = (t) => {
+      sso ??= new BoldIframeSSOToken({
+        boldBaseUrl: env.BOLD_BASE_URL || 'https://app.boldworkspace.com.br',
+        ...(clientId ? { clientId } : {}),
+        ...(clientSecret ? { clientSecret } : {}),
+      } as never);
+      return sso.verify(t) as unknown as Promise<SsoPayload>;
+    };
   }
 
   return async (token: string): Promise<PlayerIdentity> => {
@@ -96,13 +103,9 @@ export function createVerifyToken(opts: VerifyTokenOptions = {}): VerifyToken {
       if (!devEnabled) throw new AuthError('invalid_token');
       return parseDevToken(token);
     }
-    if (!verifier) {
-      // sem credenciais: token real nao pode ser verificado
-      throw new AuthError(isProd ? 'auth_unavailable' : 'invalid_token');
-    }
     let payload: SsoPayload;
     try {
-      payload = await verifier(token);
+      payload = await verifier!(token);
     } catch (err) {
       throw mapSdkError(err);
     }

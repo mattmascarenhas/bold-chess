@@ -1,0 +1,110 @@
+{
+  "files": [
+    "bora_bill.mp3",
+    "eita_giovanna.mp3",
+    "fala_comigo.mp3",
+    "mim_de_papai.mp3",
+    "que_isso.mp3",
+    "receba.mp3",
+    "tome.mp3",
+    "uiuiui.mp3"
+  ],
+  "config": {
+    "triggers": {
+      "move": {
+        "file": "move.mp3",
+        "label": "Movimento"
+      },
+      "capture": {
+        "file": "capture.mp3",
+        "label": "Captura"
+      },
+      "check": {
+        "file": "check.mp3",
+        "label": "Xeque"
+      },
+      "checkmate": {
+        "file": "checkmate.mp3",
+        "label": "Xeque-mate"
+      },
+      "victory": {
+        "file": "victory.mp3",
+        "label": "Vitória"
+      },
+      "convocation_gabigol": {
+        "file": "gabigol.mp3",
+        "label": "Convocação Gabigol"
+      },
+      "convocation_salles": {
+        "file": "salles.mp3",
+        "label": "Convocação Salles Forte"
+      },
+      "convocation_hbarril": {
+        "file": "hbarril.mp3",
+        "label": "Convocação H-Barril"
+      },
+      "convocation_pm": {
+        "file": "pm.mp3",
+        "label": "Convocação PM - Puliça"
+      },
+      "convocation_ministro": {
+        "file": "ministro.mp3",
+        "label": "Convocação Ministro"
+      },
+      "convocation_vitin": {
+        "file": "vitin.mp3",
+        "label": "Convocação Vitin"
+      },
+      "convocation_marcola": {
+        "file": "marcola.mp3",
+        "label": "Convocação Marcola"
+      },
+      "convocation_eminnym": {
+        "file": "eminnym.mp3",
+        "label": "Convocação Eminnym"
+      },
+      "convocation_jac": {
+        "file": "jac.mp3",
+        "label": "Convocação Jac"
+      },
+      "convocation_uiu": {
+        "file": "uiu.mp3",
+        "label": "Convocação UIU"
+      }
+    },
+    "emotes": {
+      "mim_de_papai": {
+        "file": "mim_de_papai.mp3",
+        "label": "Mim dê papai"
+      },
+      "receba": {
+        "file": "receba.mp3",
+        "label": "Receba!"
+      },
+      "que_isso": {
+        "file": "que_isso.mp3",
+        "label": "Que isso meu filho"
+      },
+      "tome": {
+        "file": "tome.mp3",
+        "label": "Tome!"
+      },
+      "bora_bill": {
+        "file": "bora_bill.mp3",
+        "label": "Bora Bill!"
+      },
+      "uiuiui": {
+        "file": "uiuiui.mp3",
+        "label": "Uiuiui"
+      },
+      "eita_giovanna": {
+        "file": "eita_giovanna.mp3",
+        "label": "Eita Giovanna"
+      },
+      "fala_comigo": {
+        "file": "fala_comigo.mp3",
+        "label": "Fala comigo bebê"
+      }
+    }
+  }
+}

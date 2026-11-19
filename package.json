@@ -11,7 +11,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\" \"tests/**/*.test.ts\"",
-    "sim": "tsx tools/workspace-sim/server.ts"
+    "sim": "tsx tools/workspace-sim/server.ts",
+    "build:vercel": "node scripts/build-vercel.mjs",
+    "dev:local": "tsx scripts/dev-local.ts"
   },
   "dependencies": {
     "@bold-workspace/sdk": "^0.2.26",
@@ -32,13 +34,14 @@
     "ws": "^8.23.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.25.12",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

@@ -28,7 +28,8 @@ import {
   getPieceDisplayName,
 } from './game/types';
 import { CameraPreset, ChessScene } from './three/ChessScene';
-import { GameSocket, type SocketStatus } from './net/socket';
+import type { SocketStatus } from './net/socket';
+import { createTransport, type GameTransport } from './net/transport';
 import {
   getToken,
   initWorkspace,
@@ -123,7 +124,7 @@ export default function App() {
   const [bootNonce, setBootNonce] = useState(0);
   const [me, setMe] = useState<MeInfo | null>(null);
   const [connection, setConnection] = useState<SocketStatus>('idle');
-  const socketRef = useRef<GameSocket | null>(null);
+  const socketRef = useRef<GameTransport | null>(null);
 
   // Lobby / sala
   const [online, setOnline] = useState<OnlineUser[]>([]);
@@ -372,12 +373,19 @@ export default function App() {
         meRef.current = init.identity;
 
         cleanups.push(onThemeChange(() => {}));
+        const applyActive = () => {
+          const eff = tabActiveRef.current && !document.hidden;
+          document.body.dataset.tabActive = eff ? '1' : '0';
+          socketRef.current?.setActive?.(eff);
+        };
         cleanups.push(
           onTabActive((active) => {
             tabActiveRef.current = active;
-            document.body.dataset.tabActive = active ? '1' : '0';
+            applyActive();
           })
         );
+        document.addEventListener('visibilitychange', applyActive);
+        cleanups.push(() => document.removeEventListener('visibilitychange', applyActive));
         cleanups.push(
           onNavigate((path) => {
             try {
@@ -395,8 +403,9 @@ export default function App() {
           })
         );
 
-        const socket = new GameSocket({ getToken });
+        const socket = createTransport({ getToken });
         socketRef.current = socket;
+        socket.setActive?.(tabActiveRef.current && !document.hidden);
         cleanups.push(() => {
           socket.close();
           if (socketRef.current === socket) socketRef.current = null;
