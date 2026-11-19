@@ -6,6 +6,7 @@ import {
   ClassicKind,
   GameState,
   MoveOption,
+  PieceKind,
   Pos,
   SPECIAL_BY_ID,
   getPieceDisplayName,
@@ -38,6 +39,57 @@ const KIND_LABEL: Record<string, string> = {
 const ABILITY_KINDS = new Set(['push', 'kick', 'arrest', 'decree', 'pass']);
 
 // ---------- Historico ----------
+const GLYPH: Record<'w' | 'b', Record<ClassicKind, string>> = {
+  w: { p: '♙', n: '♘', b: '♗', r: '♖', q: '♕', k: '♔' },
+  b: { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛', k: '♚' },
+};
+
+/** Icone da peca: simbolo para as classicas, emblema colorido para as especiais. */
+function PieceBadge({ kind, color, size = 26 }: { kind: PieceKind; color: 'w' | 'b'; size?: number }) {
+  if (isSpecialKind(kind)) {
+    const m = SPECIAL_BY_ID[kind];
+    return (
+      <span
+        className="rounded-md flex items-center justify-center font-bold shrink-0"
+        style={{
+          width: size,
+          height: size,
+          fontSize: size * 0.5,
+          backgroundColor: `${m.accentColor}2E`,
+          border: `1px solid ${m.accentColor}99`,
+          color: m.accentColor,
+        }}
+        title={m.name}
+      >
+        {m.emblemChar}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`rounded-md flex items-center justify-center shrink-0 leading-none ${
+        color === 'w' ? 'bg-slate-200/15 border border-slate-300/40 text-white' : 'bg-slate-950/60 border border-slate-600 text-slate-200'
+      }`}
+      style={{ width: size, height: size, fontSize: size * 0.72 }}
+      title={getPieceDisplayName(kind)}
+    >
+      {GLYPH[color][kind as ClassicKind]}
+    </span>
+  );
+}
+
+const ABILITY_VERB: Record<string, string> = {
+  kick: 'Chute a gol',
+  arrest: 'Abordagem',
+  decree: 'Decreto',
+  pass: 'Passe',
+  push: 'Empurrão',
+  convocation: 'Convocação',
+  castling: 'Roque',
+  enpassant: 'En passant',
+  promotion: 'Promoção',
+};
+
 function MoveHistory({ gameState }: { gameState: GameState }) {
   const history = gameState.history;
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -46,59 +98,64 @@ function MoveHistory({ gameState }: { gameState: GameState }) {
     endRef.current?.scrollIntoView({ block: 'end' });
   }, [history.length]);
 
-  // agrupa por numero de lance: [{ n, w, b }]
-  const rows = useMemo(() => {
-    const out: Array<{ n: number; w?: string; b?: string; wi?: number; bi?: number }> = [];
-    history.forEach((m, i) => {
-      let row = out[out.length - 1];
-      if (!row || (m.color === 'w' && (row.w !== undefined || row.b !== undefined)) || row.n !== m.moveNumber) {
-        if (m.color === 'b' && row && row.b === undefined && row.n === m.moveNumber) {
-          /* mesma linha */
-        } else {
-          row = { n: m.moveNumber };
-          out.push(row);
-        }
-      }
-      if (m.color === 'w') {
-        row.w = m.notation;
-        row.wi = i;
-      } else {
-        row.b = m.notation;
-        row.bi = i;
-      }
-    });
-    return out;
-  }, [history]);
+  if (history.length === 0) {
+    return <p className="text-xs text-slate-500 py-2">Nenhum lance ainda. Os movimentos aparecem aqui.</p>;
+  }
 
-  const lastIdx = history.length - 1;
-  const cell = (text: string | undefined, idx: number | undefined) =>
-    text === undefined ? (
-      <span className="text-slate-600">…</span>
-    ) : (
-      <span
-        className={`px-1.5 py-0.5 rounded font-mono-tabular text-[12px] ${
-          idx === lastIdx ? 'bg-[#00E676]/20 text-[#00E676] font-bold' : 'text-slate-200'
-        }`}
-      >
-        {text}
-      </span>
-    );
-
+  const last = history.length - 1;
   return (
     <div className="flex-1 min-h-0 overflow-y-auto pr-1" aria-label="Histórico de movimentos">
-      {rows.length === 0 ? (
-        <p className="text-xs text-slate-500 py-2">Nenhum lance ainda. Os movimentos aparecem aqui.</p>
-      ) : (
-        <ol className="space-y-0.5">
-          {rows.map((r) => (
-            <li key={`${r.n}-${r.wi ?? r.bi}`} className="grid grid-cols-[1.6rem_1fr_1fr] items-center gap-1 text-xs">
-              <span className="text-slate-500 tabular-nums text-right">{r.n}.</span>
-              {cell(r.w, r.wi)}
-              {cell(r.b, r.bi)}
+      <ol className="space-y-1">
+        {history.map((m, i) => {
+          const from = posToAlgebraic(m.from);
+          const to = posToAlgebraic(m.to);
+          const verb = ABILITY_VERB[m.kind];
+          const special = m.kind !== 'move' && m.kind !== 'castling' && m.kind !== 'enpassant' && m.kind !== 'promotion';
+          return (
+            <li
+              key={i}
+              className={`flex items-center gap-2 px-1.5 py-1 rounded-lg border ${
+                i === last ? 'bg-[#00E676]/10 border-[#00E676]/40' : 'border-transparent odd:bg-slate-800/25'
+              }`}
+            >
+              <span className="w-5 text-right text-[11px] text-slate-500 tabular-nums shrink-0">
+                {m.color === 'w' ? `${m.moveNumber}.` : ''}
+              </span>
+              <PieceBadge kind={m.pieceKind} color={m.color} />
+              <div className="min-w-0 flex-1 leading-tight">
+                <div className="flex items-center gap-1 text-[12px] font-mono-tabular text-white">
+                  {special && m.kind !== 'convocation' ? (
+                    <span>{to}</span>
+                  ) : m.kind === 'convocation' ? (
+                    <span>{to}</span>
+                  ) : (
+                    <>
+                      <span className="text-slate-300">{from}</span>
+                      <span className="text-slate-500" aria-hidden="true">→</span>
+                      <span className="font-bold">{to}</span>
+                    </>
+                  )}
+                  {m.capturedKind && (
+                    <span className="inline-flex items-center gap-0.5 text-red-300 ml-0.5" title={`Capturou ${getPieceDisplayName(m.capturedKind)}`}>
+                      ×
+                      <PieceBadge kind={m.capturedKind} color={m.color === 'w' ? 'b' : 'w'} size={16} />
+                    </span>
+                  )}
+                  {m.isCheckmate ? (
+                    <span className="ml-auto text-[10px] font-bold text-red-300">MATE</span>
+                  ) : m.isCheck ? (
+                    <span className="ml-auto text-[10px] font-bold text-amber-300">XEQUE</span>
+                  ) : null}
+                </div>
+                <div className="text-[10px] text-slate-400 truncate">
+                  {getPieceDisplayName(m.pieceKind)}
+                  {verb ? ` · ${verb}` : ''}
+                </div>
+              </div>
             </li>
-          ))}
-        </ol>
-      )}
+          );
+        })}
+      </ol>
       <div ref={endRef} />
     </div>
   );

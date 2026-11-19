@@ -1,4 +1,4 @@
-import { Bot, Building2, Swords } from 'lucide-react';
+import { Bot, Building2, Swords, Trophy } from 'lucide-react';
 import type { SocketStatus } from '../net/socket';
 import { Avatar, ConnectionBadge } from './Lobby';
 import { SCENE_ROOMS, SceneRoomId } from '../game/types';
@@ -8,6 +8,8 @@ interface TitleOverlayProps {
   onSelectRoom: (roomId: SceneRoomId) => void;
   onStartAI: () => void;
   onOpenLobby: () => void;
+  /** abre o ranking; so aparece quando ha usuario identificado */
+  onOpenLeaderboard?: () => void;
   user: { name: string; avatarUrl: string | null } | null;
   connection: SocketStatus;
 }
@@ -17,6 +19,7 @@ export function TitleOverlay({
   onSelectRoom,
   onStartAI,
   onOpenLobby,
+  onOpenLeaderboard,
   user,
   connection,
 }: TitleOverlayProps) {
@@ -151,6 +154,17 @@ export function TitleOverlay({
             <Swords className="w-4 h-4" />
             Multiplayer e Lobby
           </button>
+
+          {onOpenLeaderboard && (
+            <button
+              type="button"
+              onClick={onOpenLeaderboard}
+              className="w-full flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-display font-semibold text-sm border border-amber-400/30 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Trophy className="w-4 h-4" />
+              Leaderboard
+            </button>
+          )}
           <div className="flex items-center gap-2 justify-center min-h-[26px]">
             {user && <Avatar user={user} size={22} />}
             {user && <span className="text-xs text-slate-300 truncate max-w-[10rem]">{user.name}</span>}

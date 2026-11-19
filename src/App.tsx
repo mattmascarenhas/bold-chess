@@ -951,6 +951,7 @@ export default function App() {
           onSelectRoom={setSceneRoom}
           onStartAI={() => setSetup({ kind: 'ai' })}
           onOpenLobby={openLobby}
+          onOpenLeaderboard={me ? () => setLeaderboardOpen(true) : undefined}
           user={me}
           connection={connection}
         />
