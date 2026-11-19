@@ -1,4 +1,5 @@
 import { MEME_EMOTES, SPECIAL_BY_ID, SpecialId } from '../game/types';
+import { apiUrl } from '../net/serverUrl';
 
 interface AudioManifest {
   files: string[];
@@ -23,7 +24,7 @@ class BoldSoundEngine {
     if (this.manifestLoaded) return;
     this.manifestLoaded = true;
     try {
-      const res = await fetch('/api/audio-manifest');
+      const res = await fetch(apiUrl('/api/audio-manifest'));
       if (!res.ok) return;
       const data = (await res.json()) as AudioManifest;
       data.files.forEach((f) => this.availableFiles.add(f));

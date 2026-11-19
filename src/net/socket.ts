@@ -35,12 +35,13 @@ export interface GameSocketOptions {
 
 type Listener<K extends keyof SocketEventMap> = (payload: SocketEventMap[K]) => void;
 
+import { wsUrl } from './serverUrl';
+
 const WS_OPEN = 1;
 const MAX_CONSECUTIVE_EXPIRED = 3;
 
 export function defaultSocketUrl(): string {
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${window.location.host}/ws`;
+  return wsUrl();
 }
 
 export class GameSocket {

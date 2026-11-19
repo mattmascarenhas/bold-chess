@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, Trophy, X } from 'lucide-react';
 import type { LeaderboardEntry } from '../shared/protocol';
+import { apiUrl } from '../net/serverUrl';
 
 interface MeData {
   rank: number | null;
@@ -56,13 +57,13 @@ export function Leaderboard({ meUserId, onClose }: LeaderboardProps) {
     setLoading(true);
     setError(false);
     try {
-      const topRes = await fetch('/api/leaderboard?limit=50');
+      const topRes = await fetch(apiUrl('/api/leaderboard?limit=50'));
       if (!topRes.ok) throw new Error('top');
       const top = (await topRes.json()) as { entries: LeaderboardEntry[] };
       setEntries(top.entries);
       if (meUserId) {
         try {
-          const meRes = await fetch(`/api/leaderboard/me?userId=${encodeURIComponent(meUserId)}`);
+          const meRes = await fetch(apiUrl(`/api/leaderboard/me?userId=${encodeURIComponent(meUserId)}`));
           setMe(meRes.ok ? ((await meRes.json()) as MeData) : null);
         } catch {
           setMe(null);

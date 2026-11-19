@@ -111,6 +111,19 @@ export async function createGameServer(opts: GameServerOptions = {}): Promise<Ga
   const app = express();
   app.use(express.json({ limit: '16kb' }));
 
+  // CORS para o frontend hospedado em outra origem (ex.: Vercel). Rotas /api sao somente
+  // leitura publica (ranking/audio) ou sem credenciais; a autenticacao do jogo e por token no WebSocket.
+  app.use('/api', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   app.get('/api/audio-manifest', (_req, res) => {
     const audioDir = path.resolve(__dirname, 'public/audio');
     let files: string[] = [];
