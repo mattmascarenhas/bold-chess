@@ -1,0 +1,20 @@
+# Blueprint do Render: servidor do Bold Chess (WebSocket + API).
+services:
+  - type: web
+    name: bold-chess-server
+    runtime: node
+    plan: free
+    buildCommand: npm install --legacy-peer-deps && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/audio-manifest
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BOLD_BASE_URL
+        value: https://app.boldworkspace.com.br
+      - key: BOLD_CLIENT_ID
+        sync: false
+      - key: BOLD_CLIENT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false

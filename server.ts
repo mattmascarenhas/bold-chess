@@ -85,8 +85,13 @@ export async function createGameServer(opts: GameServerOptions = {}): Promise<Ga
     verifyToken = createVerifyToken();
   }
   if (!store && !leaderboard) {
-    const { createStore } = await import('./server/store');
-    store = await createStore();
+    if (process.env.DATABASE_URL) {
+      const { createPgStore } = await import('./server/store-pg');
+      store = createPgStore(process.env.DATABASE_URL);
+    } else {
+      const { createStore } = await import('./server/store');
+      store = await createStore();
+    }
   }
   if (!leaderboard) {
     const { createLeaderboard } = await import('./server/leaderboard');
