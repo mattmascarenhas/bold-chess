@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Clock, Infinity as InfinityIcon, X } from 'lucide-react';
+import { Brain, Clock, Flame, Infinity as InfinityIcon, X } from 'lucide-react';
+import { AI_LEVELS, AIDifficulty, DEFAULT_AI_LEVEL } from '../game/ai';
 import {
   MAX_BASE_MS,
   MAX_INCREMENT_MS,
@@ -32,11 +33,33 @@ export function saveLastTimeControl(tc: TimeControl | null): void {
   }
 }
 
+const LEVEL_KEY = 'bold-chess:ai-level';
+
+/** Ultimo nivel da IA escolhido neste navegador. */
+export function loadLastAILevel(): AIDifficulty {
+  try {
+    const v = window.localStorage.getItem(LEVEL_KEY);
+    return AI_LEVELS.some((l) => l.id === v) ? (v as AIDifficulty) : DEFAULT_AI_LEVEL;
+  } catch {
+    return DEFAULT_AI_LEVEL;
+  }
+}
+
+function saveLastAILevel(level: AIDifficulty): void {
+  try {
+    window.localStorage.setItem(LEVEL_KEY, level);
+  } catch {
+    /* ignora */
+  }
+}
+
 interface GameSetupModalProps {
+  /** mostra a escolha de dificuldade (partida contra a IA) */
+  showDifficulty?: boolean;
   title: string;
   subtitle?: string;
   confirmLabel: string;
-  onConfirm: (tc: TimeControl | null) => void;
+  onConfirm: (tc: TimeControl | null, level: AIDifficulty) => void;
   onCancel: () => void;
 }
 
@@ -44,8 +67,9 @@ const sameTc = (a: TimeControl | null, b: TimeControl | null) =>
   a === b || (!!a && !!b && a.baseMs === b.baseMs && a.incrementMs === b.incrementMs);
 
 /** Escolha do modo antes de comecar: livre (sem tempo) ou com tempo (preset ou personalizado). */
-export function GameSetupModal({ title, subtitle, confirmLabel, onConfirm, onCancel }: GameSetupModalProps) {
+export function GameSetupModal({ title, subtitle, confirmLabel, showDifficulty, onConfirm, onCancel }: GameSetupModalProps) {
   const initial = useMemo(loadLastTimeControl, []);
+  const [level, setLevel] = useState<AIDifficulty>(loadLastAILevel);
   const [timed, setTimed] = useState<boolean>(initial !== null);
   const [tc, setTc] = useState<TimeControl>(initial ?? TIME_PRESETS[3].tc);
   const [customMin, setCustomMin] = useState<string>(String(Math.round((initial ?? TIME_PRESETS[3].tc).baseMs / 60_000)));
@@ -80,7 +104,8 @@ export function GameSetupModal({ title, subtitle, confirmLabel, onConfirm, onCan
   const confirm = () => {
     const result = timed ? tc : null;
     saveLastTimeControl(result);
-    onConfirm(result);
+    if (showDifficulty) saveLastAILevel(level);
+    onConfirm(result, level);
   };
 
   return (
@@ -107,6 +132,50 @@ export function GameSetupModal({ title, subtitle, confirmLabel, onConfirm, onCan
         </div>
 
         <div className="p-5 space-y-5">
+          {showDifficulty && (
+            <div>
+              <div className="text-xs font-semibold text-slate-300 mb-2">Dificuldade da IA</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Dificuldade da IA">
+                {AI_LEVELS.map((l) => {
+                  const active = l.id === level;
+                  const god = l.id === 'deus';
+                  return (
+                    <button
+                      key={l.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setLevel(l.id)}
+                      className={`p-2.5 rounded-xl border text-left transition-colors cursor-pointer ${
+                        god ? 'sm:col-span-2 ' : ''
+                      }${
+                        active
+                          ? god
+                            ? 'bg-gradient-to-r from-red-950 to-amber-900/60 border-amber-400 text-white shadow-[0_0_18px_rgba(251,146,60,0.45)]'
+                            : 'bg-[#00E676]/12 border-[#00E676] text-white'
+                          : god
+                            ? 'bg-[#1a0f12] border-amber-700/60 text-slate-200 hover:border-amber-400'
+                            : 'bg-[#111C33] border-slate-700 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {god ? <Flame className="w-4 h-4 text-amber-400" /> : <Brain className="w-4 h-4 text-[#00E676]" />}
+                        <span className="font-display font-bold text-sm">{l.label}</span>
+                        <span className={`text-[10px] font-semibold ${god ? 'text-amber-300' : 'text-[#00E676]'}`}>{l.tagline}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 leading-snug mt-0.5">{l.description}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              {level === 'deus' && (
+                <p className="text-[11px] text-amber-300/90 mt-1.5">
+                  No Modo Deus a IA pode levar alguns segundos em cada jogada. Em partida com relógio ela respeita o tempo dela.
+                </p>
+              )}
+            </div>
+          )}
+
           <div>
             <div className="text-xs font-semibold text-slate-300 mb-2">Modo de jogo</div>
             <div className="grid grid-cols-2 gap-2.5">

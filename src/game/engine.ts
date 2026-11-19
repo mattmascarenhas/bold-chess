@@ -793,11 +793,38 @@ export function isKingInCheck(state: GameState, color: Color): boolean {
   return isSquareAttacked(state, kPos.row, kPos.col, oppositeColor(color));
 }
 
+/** Copia leve para busca da IA: tabuleiro e listas pequenas copiados; historico e demais campos compartilhados (nao mutados). */
+function cloneForSearch(state: GameState): GameState {
+  return {
+    ...state,
+    board: cloneBoard(state.board),
+    usedSpecials: { w: [...state.usedSpecials.w], b: [...state.usedSpecials.b] },
+    forbiddenSquares: state.forbiddenSquares.map((f) => ({ ...f })),
+    lastMovedKind: { ...state.lastMovedKind },
+    capturedBy: { w: [...state.capturedBy.w], b: [...state.capturedBy.b] },
+  };
+}
+
+/** Modo rapido (busca da IA): nao grava historico, nao detecta mate/empate e nao calcula xeque. */
+let FAST_APPLY = false;
+
+/** Aplica um lance sem custo de historico/mate; usado so pela busca da IA. */
+export function applyMoveFast(state: GameState, move: MoveOption): GameState {
+  FAST_APPLY = true;
+  try {
+    return applyMoveRaw(state, move);
+  } finally {
+    FAST_APPLY = false;
+  }
+}
+
 function applyMoveRaw(state: GameState, move: MoveOption): GameState {
-  const next = cloneState(state);
-  next.offerSeed = newOfferSeed();
-  if (!next.positionHistory || next.positionHistory.length === 0) {
-    next.positionHistory = [computePositionKey(state)];
+  const next = FAST_APPLY ? cloneForSearch(state) : cloneState(state);
+  if (!FAST_APPLY) {
+    next.offerSeed = newOfferSeed();
+    if (!next.positionHistory || next.positionHistory.length === 0) {
+      next.positionHistory = [computePositionKey(state)];
+    }
   }
   const piece = next.board[move.from.row][move.from.col];
   if (!piece) return next;
@@ -933,7 +960,7 @@ function applyMoveRaw(state: GameState, move: MoveOption): GameState {
       availableSpecials: getConvocationOffer(next, color),
     };
     // Do NOT advance turn yet until convocation choice is resolved!
-    next.inCheck = isKingInCheck(next, opp) ? opp : null;
+    next.inCheck = FAST_APPLY ? null : isKingInCheck(next, opp) ? opp : null;
     return next;
   }
 
@@ -951,6 +978,19 @@ function applyMoveRaw(state: GameState, move: MoveOption): GameState {
 
   finalizeTurnAfterMove(next, color, move, piece.kind, capturedKind);
   return next;
+}
+
+/** Versao rapida de resolveConvocation (sem historico/mate), so para a busca da IA. */
+export function resolveConvocationFast(
+  state: GameState,
+  choice: SpecialId | ClassicKind | 'keep_pawn'
+): GameState {
+  FAST_APPLY = true;
+  try {
+    return resolveConvocation(state, choice);
+  } finally {
+    FAST_APPLY = false;
+  }
 }
 
 export function isInsufficientMaterial(state: GameState): boolean {
@@ -1042,6 +1082,7 @@ function finalizeTurnAfterMove(
   } else {
     next.halfMoveClock += 1;
   }
+  if (FAST_APPLY) return;
 
   const posKey = computePositionKey(next);
   if (!next.positionHistory) next.positionHistory = [];
@@ -1119,6 +1160,11 @@ export function getLegalMoves(state: GameState, from: Pos): MoveOption[] {
   if (!piece || piece.color !== state.turn) return [];
   if ((piece.frozenTurns ?? 0) > 0) return [];
 
+  return collectCandidateMoves(state, from, piece).filter((move) => moveKeepsKingSafe(state, move, piece));
+}
+
+/** Lances candidatos (pseudo-legais + roque + promocoes especiais), ainda sem filtrar xeque do proprio rei. */
+export function collectCandidateMoves(state: GameState, from: Pos, piece: Piece): MoveOption[] {
   const pseudo = generatePseudoMoves(state, from, false);
 
   // Castling for King
@@ -1192,10 +1238,15 @@ export function getLegalMoves(state: GameState, from: Pos): MoveOption[] {
     }
   }
 
-  // Filter out moves that leave own king in check
-  return pseudo.filter((move) => {
+  return pseudo;
+}
+
+/** true se, depois do lance, o proprio rei nao fica em xeque. */
+export function moveKeepsKingSafe(state: GameState, move: MoveOption, piece: Piece): boolean {
+  const promoRow = piece.color === 'w' ? 0 : 7;
+  {
     // Temporarily simulate without triggering convocation lock
-    const sim = cloneState(state);
+    const sim = cloneForSearch(state);
     const p = sim.board[move.from.row][move.from.col];
     if (!p) return false;
 
@@ -1245,7 +1296,7 @@ export function getLegalMoves(state: GameState, from: Pos): MoveOption[] {
     }
 
     return !isKingInCheck(sim, piece.color);
-  });
+  }
 }
 
 export function getAllLegalMoves(state: GameState, color: Color): MoveOption[] {
@@ -1327,7 +1378,7 @@ export function resolveConvocation(
   return next;
 }
 
-const PIECE_VALUES: Record<PieceKind, number> = {
+export const PIECE_VALUES: Record<PieceKind, number> = {
   p: 100,
   n: 320,
   b: 330,

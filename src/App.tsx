@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { soundEngine } from './audio/soundEngine';
 import { ConvocationModal } from './components/ConvocationModal';
 import { GameHUD } from './components/GameHUD';
-import { GameSetupModal } from './components/GameSetupModal';
+import { GameSetupModal, loadLastAILevel } from './components/GameSetupModal';
+import { AIDifficulty, getAILevel } from './game/ai';
 import { SidePanel } from './components/SidePanel';
 import { TurnBanner, TurnGlow } from './components/TurnBanner';
 import { InviteToast, MatchPointsCard, inviteResultText, type IncomingInvite, type Notice } from './components/InviteToast';
@@ -126,6 +127,10 @@ export default function App() {
   /** Peca adversaria (ou fora da vez) inspecionada so para visualizar movimentos. */
   const [inspectSquare, setInspectSquare] = useState<Pos | null>(null);
   const aiTimeRef = useRef<TimeControl | null>(null);
+  const aiLevelRef = useRef<AIDifficulty>(loadLastAILevel());
+  /** estado para o qual ja pedimos jogada a IA (evita pedir de novo ao pausar/retomar) */
+  const aiAskedRef = useRef<GameState | null>(null);
+  const [aiLevelLabel, setAiLevelLabel] = useState<string>(getAILevel(aiLevelRef.current).label);
   const pausedAtRef = useRef<number | null>(null);
 
   // Workspace / conexao
@@ -318,15 +323,27 @@ export default function App() {
     if (mode !== 'ai' || screen !== 'playing') return;
     if (gameState.winner) return;
 
+    if (aiAskedRef.current === gameState) return;
+
+    // Tempo que a IA pode gastar: respeita o relogio da partida (nunca estoura por pensar demais)
+    const aiBudget = (): number | undefined => {
+      const c = gameState.clock;
+      if (!c) return undefined;
+      const spent = c.turnStartedAt !== null ? Math.max(0, Date.now() - c.turnStartedAt) : 0;
+      return Math.max(250, (c.remaining.b - spent) / 25 + c.incrementMs * 0.7);
+    };
+
     // AI Pending Convocation
     if (gameState.pendingConvocation && gameState.pendingConvocation.color === 'b') {
       setAiThinking(true);
       aiReqIdRef.current += 1;
+      aiAskedRef.current = gameState;
       workerRef.current?.postMessage({
         requestId: aiReqIdRef.current,
         state: gameState,
         aiColor: 'b',
-        depth: 3,
+        level: aiLevelRef.current,
+        timeBudgetMs: aiBudget(),
       });
       return;
     }
@@ -337,11 +354,13 @@ export default function App() {
       aiReqIdRef.current += 1;
       const reqId = aiReqIdRef.current;
       const timer = window.setTimeout(() => {
+        aiAskedRef.current = gameState;
         workerRef.current?.postMessage({
           requestId: reqId,
           state: gameState,
           aiColor: 'b',
-          depth: 3,
+          level: aiLevelRef.current,
+          timeBudgetMs: aiBudget(),
         });
       }, 260);
       return () => clearTimeout(timer);
@@ -644,8 +663,14 @@ export default function App() {
     return () => clearTimeout(id);
   }, [isCreatingRoom]);
 
-  const handleStartAI = useCallback((_skipDraft = true, time?: TimeControl | null) => {
+  const handleStartAI = useCallback((_skipDraft = true, time?: TimeControl | null, level?: AIDifficulty) => {
     if (time !== undefined) aiTimeRef.current = time;
+    if (level) {
+      aiLevelRef.current = level;
+      setAiLevelLabel(getAILevel(level).label);
+    }
+    aiAskedRef.current = null;
+    aiReqIdRef.current += 1; // descarta qualquer resposta pendente da partida anterior
     if (roomIdRef.current) socketRef.current?.send({ type: 'leave' });
     roomIdRef.current = null;
     setRoomId(null);
@@ -1004,6 +1029,7 @@ export default function App() {
               seats={seats}
               myName={me?.name ?? 'Você'}
               aiThinking={aiThinking}
+              aiLabel={aiLevelLabel}
             />
           </div>
           <div className="fixed z-10 pointer-events-none right-3 top-[4.5rem] bottom-24 flex items-start justify-end">
@@ -1095,10 +1121,11 @@ export default function App() {
           }
           confirmLabel={setup.kind === 'ai' ? 'Começar' : setup.kind === 'room' ? 'Criar sala' : 'Enviar desafio'}
           onCancel={() => setSetup(null)}
-          onConfirm={(tc) => {
+          showDifficulty={setup.kind === 'ai'}
+          onConfirm={(tc, level) => {
             const s = setup;
             setSetup(null);
-            if (s.kind === 'ai') handleStartAI(false, tc);
+            if (s.kind === 'ai') handleStartAI(false, tc, level);
             else if (s.kind === 'room') handleCreateRoom(tc);
             else handleChallenge(s.userId, tc);
           }}

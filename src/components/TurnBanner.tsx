@@ -12,6 +12,8 @@ interface TurnBannerProps {
   seats: RoomSeatInfo | null;
   myName: string;
   aiThinking: boolean;
+  /** nome do nivel da IA (modo contra o computador) */
+  aiLabel?: string;
 }
 
 interface Side {
@@ -28,7 +30,7 @@ export function TurnGlow({ active }: { active: boolean }) {
 }
 
 /** Vez em destaque + relogios dos dois jogadores. */
-export function TurnBanner({ gameState, mode, playerColor, seats, myName, aiThinking }: TurnBannerProps) {
+export function TurnBanner({ gameState, mode, playerColor, seats, myName, aiThinking, aiLabel }: TurnBannerProps) {
   const timed = !!gameState.clock;
   const running = timed && gameState.clock!.turnStartedAt !== null && !gameState.winner;
 
@@ -47,7 +49,7 @@ export function TurnBanner({ gameState, mode, playerColor, seats, myName, aiThin
     if (mode === 'ai') {
       return {
         w: { color: 'w', name: myName || 'Você', user: null, isMe: true },
-        b: { color: 'b', name: 'Robôzinho (IA)', user: null, isMe: false },
+        b: { color: 'b', name: aiLabel ? `IA · ${aiLabel}` : 'Robôzinho (IA)', user: null, isMe: false },
       };
     }
     const mk = (c: Color): Side => {
@@ -55,7 +57,7 @@ export function TurnBanner({ gameState, mode, playerColor, seats, myName, aiThin
       return { color: c, name: u?.name ?? 'Aguardando…', user: u, isMe: me === c };
     };
     return { w: mk('w'), b: mk('b') };
-  }, [mode, playerColor, seats, myName]);
+  }, [mode, playerColor, seats, myName, aiLabel]);
 
   const active = runningColor(gameState);
   const waiting = mode === 'multiplayer' && (!seats?.w || !seats?.b);
