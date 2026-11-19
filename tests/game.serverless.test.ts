@@ -504,3 +504,128 @@ test('cliente novo (cursor 0) nao recebe eventos antigos, so recentes', async ()
   assert.equal(v2.messages.filter((m) => m.type === 'invite_result').length, 0);
   await db.close();
 });
+
+// ---------- relogio / modo de jogo ----------
+const FIVE_MIN = { baseMs: 300_000, incrementMs: 2_000 };
+
+async function timedDuel(e: Env, time: { baseMs: number; incrementMs: number } | null = FIVE_MIN) {
+  const ana = await e.mk('ana', 'acme');
+  const bruno = await e.mk('bruno', 'globex');
+  await ana.send({ type: 'challenge', targetUserId: 'bruno', time });
+  const inv = find(await bruno.poll(), 'invite')!;
+  return { ana, bruno, inv };
+}
+
+test('relogio: convite leva o tempo, so comeca com os dois sentados e sai carimbado', async () => {
+  const e = await setup();
+  const { ana, bruno, inv } = await timedDuel(e);
+  assert.deepEqual(inv.time, FIVE_MIN);
+  // desafiante sozinho na sala: relogio criado, mas parado
+  assert.equal(ana.state!.clock!.baseMs, 300_000);
+  assert.equal(ana.state!.clock!.turnStartedAt, null);
+  e.clock.t += 8_000; // o convidado demora para aceitar: nao gasta tempo de ninguem
+  await bruno.send({ type: 'invite_response', inviteId: inv.inviteId, accept: true });
+  const c = bruno.state!.clock!;
+  assert.equal(c.turnStartedAt, e.clock.t);
+  assert.equal(c.now, e.clock.t); // carimbo do servidor para o cliente corrigir a latencia
+  assert.deepEqual(c.remaining, { w: 300_000, b: 300_000 });
+  await e.db.close();
+});
+
+test('relogio: jogada desconta o tempo e soma incremento; poll do outro ve o novo estado', async () => {
+  const e = await setup();
+  const { ana, bruno, inv } = await timedDuel(e);
+  await bruno.send({ type: 'invite_response', inviteId: inv.inviteId, accept: true });
+  await ana.poll();
+  e.clock.t += 12_000;
+  const mv = chooseBestAIMove(ana.state!, 'w', 1)!;
+  await ana.send({ type: 'move', move: mv });
+  assert.equal(ana.state!.turn, 'b');
+  assert.equal(ana.state!.clock!.remaining.w, 300_000 - 12_000 + 2_000);
+  assert.equal(ana.state!.clock!.turnStartedAt, e.clock.t);
+  await bruno.poll();
+  assert.equal(bruno.state!.clock!.remaining.w, 290_000);
+  await e.db.close();
+});
+
+test('relogio: tempo esgotado detectado por poll => match_ended timeout, pontua 1x', async () => {
+  const e = await setup({ absentGraceMs: 10 ** 9 }); // isola o tempo esgotado do abandono por ausencia
+  const { ana, bruno, inv } = await timedDuel(e, { baseMs: 60_000, incrementMs: 0 });
+  await bruno.send({ type: 'invite_response', inviteId: inv.inviteId, accept: true });
+  await ana.poll();
+  await playMoves(ana, bruno, 11); // partida longa o bastante para pontuar
+  assert.ok(!ana.state!.winner);
+  e.clock.t += 61_000; // estoura quem esta com a vez
+  const turnBefore = ana.state!.turn;
+  const spectatorView = await bruno.poll();
+  const ms = [...spectatorView, ...(await ana.poll())];
+  const end = ms.find((m) => m.type === 'match_ended') as Extract<ServerMessage, { type: 'match_ended' }> | undefined;
+  assert.ok(end, 'deveria haver match_ended');
+  assert.equal(end!.reason, 'timeout');
+  assert.equal(ana.state!.winner, turnBefore === 'w' ? 'b' : 'w');
+  assert.equal(ana.state!.endReason, 'timeout');
+  assert.equal(ana.state!.clock!.turnStartedAt, null);
+  assert.equal(e.calls.length, 1);
+  assert.equal(e.calls[0].reason, 'timeout');
+  // nada mais pontua em polls seguintes
+  await ana.poll();
+  await bruno.poll();
+  assert.equal(e.calls.length, 1);
+  await e.db.close();
+});
+
+test('relogio: jogada enviada depois de estourar o tempo perde a partida', async () => {
+  const e = await setup();
+  const { ana, bruno, inv } = await timedDuel(e, { baseMs: 30_000, incrementMs: 0 });
+  await bruno.send({ type: 'invite_response', inviteId: inv.inviteId, accept: true });
+  await ana.poll();
+  e.clock.t += 31_000;
+  const mv = chooseBestAIMove(ana.state!, 'w', 1)!;
+  await ana.send({ type: 'move', move: mv });
+  assert.equal(ana.state!.winner, 'b');
+  assert.equal(ana.state!.endReason, 'timeout');
+  assert.equal(ana.state!.history.length, 0); // o lance nao valeu
+  await e.db.close();
+});
+
+test('modo livre: sem relogio e nunca estoura', async () => {
+  const e = await setup();
+  const { ana, bruno, inv } = await timedDuel(e, null);
+  await bruno.send({ type: 'invite_response', inviteId: inv.inviteId, accept: true });
+  await ana.poll();
+  assert.equal(ana.state!.clock, undefined);
+  e.clock.t += 10 ** 7; // horas parado
+  await bruno.poll(); // maintain nao encerra por tempo
+  assert.ok(!bruno.state!.winner || bruno.state!.endReason !== 'timeout');
+  await e.db.close();
+});
+
+test('relogio: tempo invalido e rejeitado e sala criada leva o tempo para o lobby', async () => {
+  const e = await setup();
+  const ana = await e.mk('ana');
+  const bad = await ana.send({ type: 'create_room', time: { baseMs: 5, incrementMs: 0 } });
+  assert.equal(errorOf(bad)?.code, 'bad_request');
+  assert.equal(errorOf(bad)?.message, 'invalid_time');
+  const ok = await ana.send({ type: 'create_room', time: FIVE_MIN });
+  assert.ok(find(ok, 'room_created'));
+  const bruno = await e.mk('bruno');
+  const lobby = find(await bruno.poll(), 'lobby')!;
+  assert.deepEqual(lobby.rooms[0].time, FIVE_MIN);
+  await e.db.close();
+});
+
+test('relogio: revanche mantem o controle de tempo e reinicia o relogio', async () => {
+  const e = await setup();
+  const { ana, bruno, inv } = await timedDuel(e, { baseMs: 60_000, incrementMs: 1_000 });
+  await bruno.send({ type: 'invite_response', inviteId: inv.inviteId, accept: true });
+  await ana.poll();
+  await ana.send({ type: 'resign' });
+  assert.equal(ana.state!.clock!.turnStartedAt, null);
+  e.clock.t += 5_000;
+  await bruno.send({ type: 'rematch' });
+  assert.equal(bruno.state!.clock!.baseMs, 60_000);
+  assert.equal(bruno.state!.clock!.incrementMs, 1_000);
+  assert.deepEqual(bruno.state!.clock!.remaining, { w: 60_000, b: 60_000 });
+  assert.equal(bruno.state!.clock!.turnStartedAt, e.clock.t);
+  await e.db.close();
+});

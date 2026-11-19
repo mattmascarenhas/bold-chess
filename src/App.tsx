@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { soundEngine } from './audio/soundEngine';
 import { ConvocationModal } from './components/ConvocationModal';
 import { GameHUD } from './components/GameHUD';
+import { GameSetupModal } from './components/GameSetupModal';
+import { SidePanel } from './components/SidePanel';
+import { TurnBanner, TurnGlow } from './components/TurnBanner';
 import { InviteToast, MatchPointsCard, inviteResultText, type IncomingInvite, type Notice } from './components/InviteToast';
 import { Lobby } from './components/Lobby';
 import { SpectatorBar } from './components/SpectatorBar';
@@ -15,6 +18,7 @@ import {
   getLegalMoves,
   resolveConvocation,
 } from './game/engine';
+import { flagged, startClock, stampMove, stopClock, timeoutState, withClock } from './game/clock';
 import {
   ClassicKind,
   Color,
@@ -25,6 +29,7 @@ import {
   SPECIAL_BY_ID,
   SceneRoomId,
   SpecialId,
+  TimeControl,
   getPieceDisplayName,
 } from './game/types';
 import { CameraPreset, ChessScene } from './three/ChessScene';
@@ -116,6 +121,12 @@ export default function App() {
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('white');
   const [sceneRoom, setSceneRoom] = useState<SceneRoomId>('bold_office');
   const [aiThinking, setAiThinking] = useState(false);
+  /** Escolha de modo/tempo pendente (modal antes de comecar). */
+  const [setup, setSetup] = useState<null | { kind: 'ai' } | { kind: 'room' } | { kind: 'challenge'; userId: string }>(null);
+  /** Peca adversaria (ou fora da vez) inspecionada so para visualizar movimentos. */
+  const [inspectSquare, setInspectSquare] = useState<Pos | null>(null);
+  const aiTimeRef = useRef<TimeControl | null>(null);
+  const pausedAtRef = useRef<number | null>(null);
 
   // Workspace / conexao
   const [boot, setBoot] = useState<{ phase: 'loading' | 'ready' | 'error'; error?: WorkspaceError | Error }>({
@@ -178,10 +189,23 @@ export default function App() {
     document.body.dataset.room = sceneRoom;
   }, [screen, sceneRoom]);
 
+  // Vez do jogador local: usada no titulo, no brilho da borda e no banner
+  const myTurnNow = useMemo(() => {
+    if (screen !== 'playing' || gameState.winner || gameState.draft.phase !== 'playing') return false;
+    const mine: Color | null = mode === 'ai' ? 'w' : playerColor === 'w' || playerColor === 'b' ? playerColor : null;
+    if (!mine) return false;
+    if (mode === 'multiplayer' && !(seats?.w && seats?.b)) return false;
+    const active = gameState.pendingConvocation ? gameState.pendingConvocation.color : gameState.turn;
+    return active === mine;
+  }, [screen, gameState, mode, playerColor, seats]);
+
   // Titulo do painel no Workspace
   useEffect(() => {
-    if (boot.phase === 'ready') setTitle(roomId ? `Xadrez Bold - sala ${roomId}` : 'Xadrez Bold');
-  }, [roomId, boot.phase]);
+    if (boot.phase === 'ready') {
+      const base = roomId ? `Xadrez Bold - sala ${roomId}` : 'Xadrez Bold';
+      setTitle(myTurnNow ? `▶ Sua vez · ${base}` : base);
+    }
+  }, [roomId, boot.phase, myTurnNow]);
 
   // Load audio manifest once
   useEffect(() => {
@@ -215,7 +239,7 @@ export default function App() {
       setAiThinking(false);
 
       if (nextState) {
-        setGameState(nextState);
+        setGameState((prev) => stampMove(prev, nextState, Date.now()));
         if (convocationChoice && convocationChoice !== 'keep_pawn' && convocationChoice in SPECIAL_BY_ID) {
           const sp = SPECIAL_BY_ID[convocationChoice as SpecialId];
           soundEngine.playConvocation(sp.id);
@@ -226,7 +250,7 @@ export default function App() {
       }
 
       if (move) {
-        setGameState((prev) => applyMove(prev, move));
+        setGameState((prev) => stampMove(prev, applyMove(prev, move), Date.now()));
       }
     };
 
@@ -323,6 +347,44 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [mode, screen, gameState]);
+
+  // ---------- Relogio local (modo contra a IA) ----------
+  const gameStateRef = useRef(gameState);
+  gameStateRef.current = gameState;
+
+  // Tempo esgotado contra a IA
+  useEffect(() => {
+    if (mode !== 'ai' || screen !== 'playing' || !gameState.clock) return;
+    const id = window.setInterval(() => {
+      const cur = gameStateRef.current;
+      const loser = flagged(cur, Date.now());
+      if (loser) setGameState(timeoutState(cur, loser));
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [mode, screen, !!gameState.clock, gameState.winner]);
+
+  // Pausa congela o relogio local; ao retomar, empurra o inicio do turno pelo tempo parado
+  useEffect(() => {
+    if (mode !== 'ai') return;
+    if (screen === 'paused') {
+      pausedAtRef.current = Date.now();
+    } else if (pausedAtRef.current !== null) {
+      const stoppedFor = Date.now() - pausedAtRef.current;
+      pausedAtRef.current = null;
+      if (screen === 'playing' && stoppedFor > 0) {
+        setGameState((prev) =>
+          prev.clock && prev.clock.turnStartedAt !== null
+            ? { ...prev, clock: { ...prev.clock, turnStartedAt: prev.clock.turnStartedAt + stoppedFor } }
+            : prev
+        );
+      }
+    }
+  }, [screen, mode]);
+
+  // A selecao de inspecao some quando o jogo anda
+  useEffect(() => {
+    setInspectSquare(null);
+  }, [gameState.history.length]);
 
   // ---------- Sala: helpers ----------
   /** Sai da sala so no estado local (o servidor ja sabe ou nao precisa saber). */
@@ -505,7 +567,7 @@ export default function App() {
           setInvites((prev) =>
             prev.some((i) => i.inviteId === msg.inviteId)
               ? prev
-              : [...prev, { inviteId: msg.inviteId, from: msg.from, roomId: msg.roomId, expiresAt: msg.expiresAt }]
+              : [...prev, { inviteId: msg.inviteId, from: msg.from, roomId: msg.roomId, expiresAt: msg.expiresAt, time: msg.time ?? null }]
           );
           if (!tabActiveRef.current) notifyLocal('Xadrez Bold', `${msg.from.name} te desafiou para uma partida`);
         });
@@ -582,7 +644,8 @@ export default function App() {
     return () => clearTimeout(id);
   }, [isCreatingRoom]);
 
-  const handleStartAI = useCallback((_skipDraft = true) => {
+  const handleStartAI = useCallback((_skipDraft = true, time?: TimeControl | null) => {
+    if (time !== undefined) aiTimeRef.current = time;
     if (roomIdRef.current) socketRef.current?.send({ type: 'leave' });
     roomIdRef.current = null;
     setRoomId(null);
@@ -595,7 +658,8 @@ export default function App() {
     setSelectedSquare(null);
     setLegalMoves([]);
     setPendingPromotionDest(null);
-    setGameState(createInitialState(true));
+    setGameState(withClock(createInitialState(true), aiTimeRef.current, aiTimeRef.current ? Date.now() : null));
+    setInspectSquare(null);
     setRobotSpeaker('Robôzinho da Bold');
     setRobotSpeech(
       'Partida aberta! Chegue à 6ª ou 8ª fileira para convocar especiais.'
@@ -603,16 +667,16 @@ export default function App() {
     setScreen('playing');
   }, []);
 
-  const handleCreateRoom = useCallback(() => {
+  const handleCreateRoom = useCallback((time: TimeControl | null) => {
     if (!socketRef.current) return;
     setIsCreatingRoom(true);
-    socketRef.current.send({ type: 'create_room', sceneRoom });
+    socketRef.current.send({ type: 'create_room', sceneRoom, time });
   }, [sceneRoom]);
 
   const handleChallenge = useCallback(
-    (userId: string) => {
+    (userId: string, time: TimeControl | null) => {
       setChallengingUserId(userId);
-      socketRef.current?.send({ type: 'challenge', targetUserId: userId, sceneRoom });
+      socketRef.current?.send({ type: 'challenge', targetUserId: userId, sceneRoom, time });
       pushNotice('Desafio enviado. Aguardando resposta...', 'info');
     },
     [sceneRoom, pushNotice]
@@ -641,7 +705,7 @@ export default function App() {
       }
       if (screen === 'title' && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
-        handleStartAI(false);
+        setSetup((cur) => cur ?? { kind: 'ai' });
         return;
       }
       if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
@@ -658,7 +722,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [screen, handleStartAI]);
+  }, [screen]);
 
   const isSpectator = mode === 'multiplayer' && playerColor === 'spectator';
 
@@ -685,8 +749,16 @@ export default function App() {
       if (screen !== 'playing' || gameState.draft.phase !== 'playing' || gameState.winner) return;
       if (gameState.pendingConvocation) return;
 
+      const clickedAny = gameState.board[pos.row][pos.col];
+      const sameAsInspect = !!inspectSquare && inspectSquare.row === pos.row && inspectSquare.col === pos.col;
       const myTurnColor = mode === 'ai' ? 'w' : playerColor;
-      if (myTurnColor === 'spectator' || gameState.turn !== myTurnColor) return;
+      if (myTurnColor === 'spectator' || gameState.turn !== myTurnColor) {
+        // Fora da vez (ou espectador): so visualiza os movimentos da peca clicada.
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        setInspectSquare(clickedAny && !sameAsInspect ? pos : null);
+        return;
+      }
 
       // Check if clicking a legal move destination for the currently selected piece
       const matchedMove = legalMoves.find(
@@ -701,10 +773,11 @@ export default function App() {
         if (mode === 'multiplayer') {
           sendGameAction({ type: 'move', move: matchedMove });
         } else {
-          setGameState((prev) => applyMove(prev, matchedMove));
+          setGameState((prev) => stampMove(prev, applyMove(prev, matchedMove), Date.now()));
         }
         setSelectedSquare(null);
         setLegalMoves([]);
+        setInspectSquare(null);
         return;
       }
 
@@ -721,14 +794,17 @@ export default function App() {
           return;
         }
         const moves = getLegalMoves(gameState, pos);
+        setInspectSquare(null);
         setSelectedSquare(pos);
         setLegalMoves(moves);
       } else {
+        // Peca adversaria: mostra como ela se move (so visualizacao).
         setSelectedSquare(null);
         setLegalMoves([]);
+        setInspectSquare(clickedAny && !sameAsInspect ? pos : null);
       }
     },
-    [screen, gameState, mode, playerColor, legalMoves, selectedSquare, sendGameAction]
+    [screen, gameState, mode, playerColor, legalMoves, selectedSquare, inspectSquare, sendGameAction]
   );
 
   const handleResolveConvocation = (choice: SpecialId | ClassicKind | 'keep_pawn') => {
@@ -756,7 +832,7 @@ export default function App() {
         if (mode === 'multiplayer') {
           sendGameAction({ type: 'move', move: targetMove });
         } else {
-          setGameState((prev) => applyMove(prev, targetMove));
+          setGameState((prev) => stampMove(prev, applyMove(prev, targetMove), Date.now()));
         }
       }
       return;
@@ -765,7 +841,7 @@ export default function App() {
     if (mode === 'multiplayer') {
       sendGameAction({ type: 'convocate', choice });
     } else {
-      setGameState((prev) => resolveConvocation(prev, choice));
+      setGameState((prev) => stampMove(prev, resolveConvocation(prev, choice), Date.now()));
     }
   };
 
@@ -790,11 +866,13 @@ export default function App() {
     if (mode === 'multiplayer') {
       sendGameAction({ type: 'resign' });
     } else {
-      setGameState((prev) => ({
-        ...prev,
-        winner: 'b',
-        endReason: 'resign',
-      }));
+      setGameState((prev) =>
+        stopClock({
+          ...prev,
+          winner: 'b',
+          endReason: 'resign',
+        })
+      );
       setScreen('gameover');
     }
   };
@@ -838,13 +916,26 @@ export default function App() {
 
   const inAiPlay = mode === 'ai' && screen === 'playing';
 
+  const focusSquare = selectedSquare ?? inspectSquare;
+  const inspectMoves = useMemo<MoveOption[]>(() => {
+    if (!inspectSquare || selectedSquare) return [];
+    const piece = gameState.board[inspectSquare.row]?.[inspectSquare.col];
+    if (!piece) return [];
+    try {
+      return getLegalMoves({ ...gameState, turn: piece.color }, inspectSquare);
+    } catch {
+      return [];
+    }
+  }, [gameState, inspectSquare, selectedSquare]);
+  const focusMoves = selectedSquare ? legalMoves : inspectMoves;
+
   return (
     <main className="w-screen h-screen relative overflow-hidden bg-[#070B14]">
       {/* Isolated 3D WebGL Viewport */}
       <ChessScene
         gameState={gameState}
-        selectedSquare={selectedSquare}
-        legalMoves={legalMoves}
+        selectedSquare={focusSquare}
+        legalMoves={focusMoves}
         playerPerspective={playerColor === 'b' ? 'b' : 'w'}
         cameraPreset={cameraPreset}
         roomId={sceneRoom}
@@ -858,7 +949,7 @@ export default function App() {
         <TitleOverlay
           selectedRoom={sceneRoom}
           onSelectRoom={setSceneRoom}
-          onStartAI={() => handleStartAI(false)}
+          onStartAI={() => setSetup({ kind: 'ai' })}
           onOpenLobby={openLobby}
           user={me}
           connection={connection}
@@ -876,10 +967,10 @@ export default function App() {
           creatingRoom={isCreatingRoom}
           sceneRoom={sceneRoom}
           onSelectSceneRoom={setSceneRoom}
-          onChallenge={handleChallenge}
-          onCreateRoom={handleCreateRoom}
+          onChallenge={(userId) => setSetup({ kind: 'challenge', userId })}
+          onCreateRoom={() => setSetup({ kind: 'room' })}
           onJoinRoom={(code, asSpectator) => joinRoom(code, asSpectator)}
-          onStartAI={() => handleStartAI(false)}
+          onStartAI={() => setSetup({ kind: 'ai' })}
           onOpenLeaderboard={() => setLeaderboardOpen(true)}
           onBack={() => setScreen('title')}
         />
@@ -894,6 +985,36 @@ export default function App() {
           connection={connection}
           onLeave={leaveRoom}
         />
+      )}
+
+      {/* Vez em destaque, relogios, painel de lances e peca */}
+      {(screen === 'playing' || screen === 'paused') && gameState.draft.phase === 'playing' && (
+        <>
+          <TurnGlow active={myTurnNow && screen === 'playing'} />
+          <div
+            className={`fixed z-10 pointer-events-none flex justify-center ${
+              mode === 'multiplayer' ? 'top-[3.75rem]' : 'top-3'
+            } left-2 right-2 md:left-[19rem] md:right-[11rem]`}
+          >
+            <TurnBanner
+              gameState={gameState}
+              mode={mode}
+              playerColor={playerColor}
+              seats={seats}
+              myName={me?.name ?? 'Você'}
+              aiThinking={aiThinking}
+            />
+          </div>
+          <div className="fixed z-10 pointer-events-none right-3 top-[4.5rem] bottom-24 flex items-start justify-end">
+            <SidePanel
+              gameState={gameState}
+              focusSquare={focusSquare}
+              focusMoves={focusMoves}
+              focusIsPlayable={!!selectedSquare}
+              defaultCollapsed={typeof window !== 'undefined' && window.innerWidth < 1100}
+            />
+          </div>
+        </>
       )}
 
       {/* Active Match HUD */}
@@ -957,6 +1078,31 @@ export default function App() {
             );
           })()
         ) : null)}
+
+      {/* Escolha de modo (livre / com tempo) antes de comecar */}
+      {setup && (
+        <GameSetupModal
+          title={
+            setup.kind === 'ai' ? 'Jogar contra o Robôzinho' : setup.kind === 'room' ? 'Criar sala' : 'Desafiar jogador'
+          }
+          subtitle={
+            setup.kind === 'challenge'
+              ? `Quem for desafiado vê o modo e aceita ou recusa. Desafio para ${online.find((u) => u.userId === setup.userId)?.name ?? 'o jogador'}.`
+              : setup.kind === 'room'
+                ? 'Quem entrar na sala joga com o modo que você escolher.'
+                : 'Escolha como será a partida.'
+          }
+          confirmLabel={setup.kind === 'ai' ? 'Começar' : setup.kind === 'room' ? 'Criar sala' : 'Enviar desafio'}
+          onCancel={() => setSetup(null)}
+          onConfirm={(tc) => {
+            const s = setup;
+            setSetup(null);
+            if (s.kind === 'ai') handleStartAI(false, tc);
+            else if (s.kind === 'room') handleCreateRoom(tc);
+            else handleChallenge(s.userId, tc);
+          }}
+        />
+      )}
 
       {/* Pause / Game Over Modal */}
       {(screen === 'paused' || screen === 'gameover') && (

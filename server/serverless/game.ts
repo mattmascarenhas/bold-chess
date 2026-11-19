@@ -12,7 +12,17 @@ import {
   oppositeColor,
   resolveConvocation,
 } from '../../src/game/engine';
-import type { Color, GameState, SceneRoomId } from '../../src/game/types';
+import {
+  flagged,
+  parseTimeControl,
+  startClock,
+  stampMove,
+  stopClock,
+  timeControlOf,
+  timeoutState,
+  withClock,
+} from '../../src/game/clock';
+import type { Color, GameState, SceneRoomId, TimeControl } from '../../src/game/types';
 import {
   ABSENT_GRACE_MS,
   MAX_ROOMS,
@@ -251,9 +261,15 @@ export function createGame(deps: GameDeps): Game {
     }
   }
 
+  /** Grava uma jogada aplicando o relogio; se quem jogou estourou o tempo, perde por tempo. */
+  async function writeStamped(c: Ctx, prev: GameState, next: GameState): Promise<void> {
+    const stamped = stampMove(prev, next, clock());
+    await writeState(c, stamped, stamped.endReason === 'timeout' ? { reason: 'timeout' } : {});
+  }
+
   async function forfeit(c: Ctx, loser: Color, reason: string, recipients?: string[]): Promise<void> {
     if (c.room.state.winner) return;
-    await writeState(c, { ...c.room.state, winner: oppositeColor(loser), endReason: 'resign' }, { reason, recipients });
+    await writeState(c, stopClock({ ...c.room.state, winner: oppositeColor(loser), endReason: 'resign' }), { reason, recipients });
   }
 
   /** Pontua (fora da tx) e avisa todos os destinatarios. Nunca lanca. */
@@ -296,6 +312,11 @@ export function createGame(deps: GameDeps): Game {
     c.members.push({ user_id: me.userId, identity: me, seat, last_seen: t, last_emote: 0 });
     await c.q.query('UPDATE chess_online SET room_id = $2 WHERE user_id = $1', [me.userId, c.room.id]);
     await bumpSeats(c, t);
+    // Com os dois jogadores sentados, o relogio (se houver) comeca a correr para as brancas.
+    const seated = playersOf(c.members);
+    if (seated.w && seated.b && c.room.state.clock && c.room.state.clock.turnStartedAt === null && !c.room.state.winner) {
+      await writeState(c, startClock(c.room.state, t));
+    }
     return { seat, resumed: false };
   }
 
@@ -336,6 +357,13 @@ export function createGame(deps: GameDeps): Game {
     | { status: 'ok'; roomId: string; sceneRoom: SceneRoomId; seat: Seat; resumed: boolean }
     | { status: 'in_game' | 'not_found' | 'retry' };
 
+  function roomTime(raw: unknown): TimeControl | null {
+    if (!raw) return null;
+    const c = parseJson<{ baseMs?: number; incrementMs?: number }>(raw);
+    const p = parseTimeControl({ baseMs: Number(c.baseMs), incrementMs: Number(c.incrementMs ?? 0) });
+    return p.ok ? p.tc : null;
+  }
+
   function newCode(): string {
     let id = '';
     for (let i = 0; i < 6; i++) id += CODE_CHARS[Math.floor(rnd() * CODE_CHARS.length) % CODE_CHARS.length];
@@ -345,7 +373,7 @@ export function createGame(deps: GameDeps): Game {
   /** Cria/entra numa sala de forma atomica para o usuario (sai da sala anterior antes). */
   async function place(
     me: PlayerIdentity,
-    target: { roomId: string } | { create: SceneRoomId },
+    target: { roomId: string } | { create: SceneRoomId; time?: TimeControl | null },
     mode: 'auto' | 'spectator' | 'w' | 'b',
     after?: (c: Ctx) => Promise<void>
   ): Promise<Place> {
@@ -370,7 +398,7 @@ export function createGame(deps: GameDeps): Game {
             const ins = await q.query(
               `INSERT INTO chess_rooms (id, scene_room, state, state_ver, seats_ver, scored, created_at, updated_at)
                VALUES ($1, $2, $3::jsonb, 1, 1, FALSE, $4, $4) ON CONFLICT (id) DO NOTHING RETURNING id`,
-              [cand, (target as { create: SceneRoomId }).create, JSON.stringify(createInitialState(true)), t]
+              [cand, (target as { create: SceneRoomId }).create, JSON.stringify(withClock(createInitialState(true), (target as { time?: TimeControl | null }).time ?? null)), t]
             );
             if (ins.rows[0]) {
               id = cand;
@@ -449,13 +477,13 @@ export function createGame(deps: GameDeps): Game {
           if (!playing) return ['bad_request', 'waiting_opponent'];
           if (typeof msg.specialId !== 'string') return ['bad_request'];
           const next = draftPick(state, color, msg.specialId);
-          if (next !== state) await writeState(c, next);
+          if (next !== state) await writeStamped(c, state, next);
           return;
         }
         case 'auto_draft': {
           if (!playing) return ['bad_request', 'waiting_opponent'];
           const next = autoDraftRemaining(state);
-          if (next !== state) await writeState(c, next);
+          if (next !== state) await writeStamped(c, state, next);
           return;
         }
         case 'move': {
@@ -464,7 +492,7 @@ export function createGame(deps: GameDeps): Game {
           if (!mv || !isPos(mv.from) || !isPos(mv.to)) return ['bad_request'];
           if (state.turn !== color) return ['not_your_turn'];
           const next = applyMove(state, msg.move);
-          if (next !== state) await writeState(c, next);
+          if (next !== state) await writeStamped(c, state, next);
           return;
         }
         case 'convocate': {
@@ -472,17 +500,21 @@ export function createGame(deps: GameDeps): Game {
           if (typeof msg.choice !== 'string') return ['bad_request'];
           if (state.pendingConvocation?.color !== color) return ['not_your_turn'];
           const next = resolveConvocation(state, msg.choice);
-          if (next !== state) await writeState(c, next);
+          if (next !== state) await writeStamped(c, state, next);
           return;
         }
         case 'resign': {
           if (!playing) return;
-          await writeState(c, { ...state, winner: oppositeColor(color), endReason: 'resign' });
+          await writeState(c, stopClock({ ...state, winner: oppositeColor(color), endReason: 'resign' }));
           return;
         }
         case 'rematch': {
           if (!state.winner) return ['bad_request', 'game_not_finished'];
-          await writeState(c, createInitialState(true), { resetScored: true });
+          {
+            const both = playersOf(c.members);
+            const fresh = withClock(createInitialState(true), timeControlOf(state), both.w && both.b ? clock() : null);
+            await writeState(c, fresh, { resetScored: true });
+          }
           return;
         }
         case 'emote': {
@@ -530,9 +562,11 @@ export function createGame(deps: GameDeps): Game {
     if ((await roomCount()) >= maxRooms) return fail(out, 'rate_limited', 'too_many_rooms');
 
     const scene = sceneOrDefault(msg.sceneRoom);
+    const time = parseTimeControl(msg.time);
+    if (!time.ok) return fail(out, 'bad_request', 'invalid_time');
     const inviteId = randomUUID();
     const expiresAt = t + inviteTtlMs;
-    const res = await place(me, { create: scene }, 'w', async (c) => {
+    const res = await place(me, { create: scene, time: time.tc }, 'w', async (c) => {
       await c.q.query(
         `INSERT INTO chess_invites (id, from_user, to_user, from_identity, room_id, scene_room, status, created_at, expires_at)
          VALUES ($1, $2, $3, $4::jsonb, $5, $6, 'pending', $7, $8)`,
@@ -541,7 +575,7 @@ export function createGame(deps: GameDeps): Game {
       await addEvents(
         c.q,
         [target],
-        { type: 'invite', inviteId, from: pub(me), roomId: c.room.id, sceneRoom: scene, expiresAt },
+        { type: 'invite', inviteId, from: pub(me), roomId: c.room.id, sceneRoom: scene, expiresAt, time: time.tc },
         t
       );
     });
@@ -627,7 +661,9 @@ export function createGame(deps: GameDeps): Game {
         const t = clock();
         await cleanup(t);
         if ((await roomCount()) >= maxRooms) return fail(out, 'rate_limited', 'too_many_rooms');
-        const res = await place(me, { create: sceneOrDefault(msg.sceneRoom) }, 'auto');
+        const time = parseTimeControl(msg.time);
+        if (!time.ok) return fail(out, 'bad_request', 'invalid_time');
+        const res = await place(me, { create: sceneOrDefault(msg.sceneRoom), time: time.tc }, 'auto');
         if (res.status === 'in_game') return fail(out, 'bad_request', 'in_game');
         if (res.status !== 'ok') return fail(out, 'bad_request');
         out.imm.push({ type: 'room_created', roomId: res.roomId, sceneRoom: res.sceneRoom });
@@ -699,8 +735,14 @@ export function createGame(deps: GameDeps): Game {
     };
   }
 
-  function findStale(state: GameState, members: Member[], viewer: string, t: number): { loser: Color | null; specs: string[] } {
+  function findStale(
+    state: GameState,
+    members: Member[],
+    viewer: string,
+    t: number
+  ): { loser: Color | null; specs: string[]; flag: Color | null } {
     let loser: Color | null = null;
+    const flag = inProgress(state, members) ? flagged(state, t) : null;
     if (inProgress(state, members)) {
       const p = playersOf(members);
       let worst = Infinity;
@@ -713,15 +755,19 @@ export function createGame(deps: GameDeps): Game {
       }
     }
     const specs = members.filter((m) => m.seat === 'spectator' && m.user_id !== viewer && m.last_seen < t - SPECTATOR_STALE_MS).map((m) => m.user_id);
-    return { loser, specs };
+    return { loser, specs, flag };
   }
 
   /** Abandono por ausencia + remocao de espectadores ausentes. True se mudou algo. */
   async function maintain(me: PlayerIdentity, v: View, t: number): Promise<boolean> {
     const s = findStale(v.room.state, v.members, me.userId, t);
-    if (!s.loser && !s.specs.length) return false;
+    if (!s.loser && !s.specs.length && !s.flag) return false;
     await withRoom(v.room.id, async (c) => {
       const s2 = findStale(c.room.state, c.members, me.userId, t);
+      if (s2.flag && !c.room.state.winner) {
+        // Tempo esgotado: quem estava com o relogio correndo perde.
+        await writeState(c, timeoutState(c.room.state, s2.flag), { reason: 'timeout' });
+      }
       if (s2.loser) {
         const lm = playersOf(c.members)[s2.loser]!;
         await forfeit(c, s2.loser, 'abandon');
@@ -740,7 +786,7 @@ export function createGame(deps: GameDeps): Game {
       [since]
     );
     const rooms = await db.query(
-      `SELECT r.id, r.scene_room, (r.state->>'winner') AS winner,
+      `SELECT r.id, r.scene_room, (r.state->>'winner') AS winner, (r.state->'clock') AS clock,
          json_agg(json_build_object('user_id', m.user_id, 'identity', m.identity, 'seat', m.seat, 'last_seen', m.last_seen)) AS members
        FROM chess_rooms r JOIN chess_members m ON m.room_id = r.id
        GROUP BY r.id HAVING bool_or(m.last_seen > $1)
@@ -761,6 +807,7 @@ export function createGame(deps: GameDeps): Game {
         black: p.b ? memberPub(p.b) : null,
         spectatorCount: ms.filter((m) => m.seat === 'spectator' && m.last_seen > since).length,
         phase: r.winner ? 'finished' : p.w && p.b ? 'playing' : 'waiting',
+        time: roomTime(r.clock),
       };
     });
     return { type: 'lobby', online: onlineList, rooms: roomList };
@@ -816,7 +863,11 @@ export function createGame(deps: GameDeps): Game {
       if (pos.roomId !== null && !messages.some((m) => m.type === 'left')) messages.push({ type: 'left' });
       npos = { roomId: null, sv: 0, pv: 0, cursor };
     }
-    return { messages, pos: npos };
+    // Estados com relogio saem carimbados com a hora do servidor (o cliente corrige a latencia).
+    const stamped = messages.map((m) =>
+      (m.type === 'joined' || m.type === 'state') && m.state.clock ? { ...m, state: { ...m.state, clock: { ...m.state.clock, now: t } } } : m
+    );
+    return { messages: stamped, pos: npos };
   }
 
   // ---------- API ----------

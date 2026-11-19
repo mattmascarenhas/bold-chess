@@ -78,6 +78,7 @@ export function cloneState(state: GameState): GameState {
     },
     history: [...state.history],
     positionHistory: state.positionHistory ? [...state.positionHistory] : [],
+    ...(state.clock ? { clock: { ...state.clock, remaining: { ...state.clock.remaining } } } : {}),
   };
 }
 

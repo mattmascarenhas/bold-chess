@@ -1,6 +1,6 @@
 // Contrato cliente <-> servidor do Bold Chess no Bold Workspace.
 // Fonte unica da verdade. Mudancas aqui exigem alinhar client e server.
-import type { ClassicKind, Color, GameState, MoveOption, SceneRoomId, SpecialId } from '../game/types';
+import type { ClassicKind, Color, GameState, MoveOption, SceneRoomId, SpecialId, TimeControl } from '../game/types';
 
 /** Identidade vinda do Workspace (SSO). Nunca vem do cliente em texto livre. */
 export interface PlayerIdentity {
@@ -26,6 +26,8 @@ export interface RoomSummary {
   black: PlayerIdentity | null;
   spectatorCount: number;
   phase: 'waiting' | 'playing' | 'finished';
+  /** controle de tempo da sala; null/ausente = livre */
+  time?: TimeControl | null;
 }
 
 export interface OnlineUser extends PlayerIdentity {
@@ -50,10 +52,10 @@ export type MatchResult = 'w' | 'b' | 'draw';
 export type ClientMessage =
   | { type: 'auth'; token: string }
   | { type: 'lobby_list' }
-  | { type: 'create_room'; sceneRoom?: SceneRoomId }
+  | { type: 'create_room'; sceneRoom?: SceneRoomId; time?: TimeControl | null }
   | { type: 'join'; roomId: string; asSpectator?: boolean }
   | { type: 'leave' }
-  | { type: 'challenge'; targetUserId: string; sceneRoom?: SceneRoomId }
+  | { type: 'challenge'; targetUserId: string; sceneRoom?: SceneRoomId; time?: TimeControl | null }
   | { type: 'invite_response'; inviteId: string; accept: boolean }
   | { type: 'draft_pick'; specialId: SpecialId }
   | { type: 'auto_draft' }
@@ -83,7 +85,7 @@ export type ServerMessage =
   | { type: 'left' }
   | { type: 'state'; state: GameState; event?: unknown; convocation?: string }
   | { type: 'emote'; emoteId: string; fromColor: Color }
-  | { type: 'invite'; inviteId: string; from: PlayerIdentity; roomId: string; sceneRoom: SceneRoomId; expiresAt: number }
+  | { type: 'invite'; inviteId: string; from: PlayerIdentity; roomId: string; sceneRoom: SceneRoomId; expiresAt: number; time?: TimeControl | null }
   | { type: 'invite_result'; inviteId: string; status: 'accepted' | 'declined' | 'expired' | 'offline'; roomId?: string }
   | { type: 'match_ended'; roomId: string; result: MatchResult; reason: string; points: PointsAward[] }
   | { type: 'error'; code: ErrorCode; message?: string }

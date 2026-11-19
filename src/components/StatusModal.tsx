@@ -44,15 +44,19 @@ export function StatusModal({
     } else if (gameState.winner === 'w') {
       title = 'Vitória das Brancas!';
       subtitle =
-        gameState.endReason === 'resign'
-          ? 'As Pretas desistiram da partida.'
-          : 'Xeque-mate! Não há mais defesa possível para as Pretas.';
+        gameState.endReason === 'timeout'
+          ? 'O tempo das Pretas acabou.'
+          : gameState.endReason === 'resign'
+            ? 'As Pretas desistiram da partida.'
+            : 'Xeque-mate! Não há mais defesa possível para as Pretas.';
     } else {
       title = 'Vitória das Pretas!';
       subtitle =
-        gameState.endReason === 'resign'
-          ? 'As Brancas desistiram da partida.'
-          : 'Xeque-mate! Não há mais defesa possível para as Brancas.';
+        gameState.endReason === 'timeout'
+          ? 'O tempo das Brancas acabou.'
+          : gameState.endReason === 'resign'
+            ? 'As Brancas desistiram da partida.'
+            : 'Xeque-mate! Não há mais defesa possível para as Brancas.';
     }
   }
 

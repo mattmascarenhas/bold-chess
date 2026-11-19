@@ -120,6 +120,40 @@ export interface MoveRecord {
   isCheckmate: boolean;
 }
 
+/** Controle de tempo escolhido antes da partida. null/ausente = modo livre. */
+export interface TimeControl {
+  baseMs: number;
+  incrementMs: number;
+}
+
+export interface ClockState {
+  baseMs: number;
+  incrementMs: number;
+  /** tempo restante de cada lado no inicio do turno atual */
+  remaining: Record<Color, number>;
+  /** epoch (ms) em que o turno atual comecou; null = relogio parado/nao iniciado */
+  turnStartedAt: number | null;
+  /** hora do servidor ao enviar este estado ao cliente (so em mensagens de saida) */
+  now?: number;
+}
+
+/** Controle de tempo escolhido antes da partida. null/ausente = modo livre. */
+export interface TimeControl {
+  baseMs: number;
+  incrementMs: number;
+}
+
+export interface ClockState {
+  baseMs: number;
+  incrementMs: number;
+  /** tempo restante de cada lado no inicio do turno atual */
+  remaining: Record<Color, number>;
+  /** epoch (ms) em que o turno atual comecou; null = relogio parado/nao iniciado */
+  turnStartedAt: number | null;
+  /** hora do servidor ao enviar este estado ao cliente (so em mensagens de saida) */
+  now?: number;
+}
+
 export interface GameState {
   board: (Piece | null)[][];
   turn: Color;
@@ -139,6 +173,7 @@ export interface GameState {
     | 'fifty_move'
     | 'resign'
     | 'agreement'
+    | 'timeout'
     | null;
   inCheck: Color | null;
   halfMoveClock: number;
@@ -146,6 +181,8 @@ export interface GameState {
   capturedBy: Record<Color, PieceKind[]>;
   history: MoveRecord[];
   positionHistory?: string[];
+  /** Relogio da partida; ausente = modo livre (sem tempo). */
+  clock?: ClockState;
 }
 
 export interface SpecialMeta {

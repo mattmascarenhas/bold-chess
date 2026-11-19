@@ -2,12 +2,16 @@ import { useEffect, useState } from 'react';
 import { Check, Swords, X } from 'lucide-react';
 import type { PlayerIdentity, PointsAward, MatchResult } from '../shared/protocol';
 import { Avatar } from './Lobby';
+import { describeTimeControl } from '../game/clock';
+import type { TimeControl } from '../game/types';
 
 export interface IncomingInvite {
   inviteId: string;
   from: PlayerIdentity;
   roomId: string;
   expiresAt: number;
+  /** controle de tempo proposto; null/ausente = livre */
+  time?: TimeControl | null;
 }
 
 export interface Notice {
@@ -53,6 +57,9 @@ function InviteCard({
           <div className="text-sm font-semibold text-white truncate">{invite.from.name}</div>
           <div className="text-[11px] text-slate-300 flex items-center gap-1">
             <Swords className="w-3 h-3 text-[#00E676]" /> te desafiou para uma partida
+          </div>
+          <div className="text-[11px] font-semibold text-[#00E676] mt-0.5">
+            Modo: {invite.time ? describeTimeControl(invite.time) + ' por jogador' : 'Livre (sem tempo)'}
           </div>
         </div>
         <span className="font-mono-tabular text-xs text-amber-300 shrink-0" aria-label="Segundos restantes">

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Bot, Copy, Eye, Link2, LogIn, Plus, Swords, Trophy, Users, Wifi, WifiOff } from 'lucide-react';
 import { SCENE_ROOMS, SceneRoomId } from '../game/types';
+import { describeTimeControl } from '../game/clock';
 import type { OnlineUser, PlayerIdentity, RoomSummary } from '../shared/protocol';
 import type { SocketStatus } from '../net/socket';
 
@@ -301,6 +302,9 @@ export function Lobby({
                         }`}
                       >
                         {r.phase === 'playing' ? 'ao vivo' : 'aberta'}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700/60 text-slate-200">
+                        {describeTimeControl(r.time)}
                       </span>
                       {r.spectatorCount > 0 && (
                         <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-slate-400">
