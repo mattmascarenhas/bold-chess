@@ -185,7 +185,8 @@ export function MatchPointsCard({
           : mine.reason === 'daily_limit'
             ? 'Limite diário de partidas pontuadas contra a IA atingido.'
             : 'Esta partida não conta para o ranking.';
-  } else detail = `Total: ${mine.total} pontos`;
+  } else if (vsAiLabel && mine.delta === 0) detail = 'Derrota contra a IA não vale pontos.';
+  else detail = `Total: ${mine.total} pontos`;
 
   return (
     <div
@@ -204,7 +205,7 @@ export function MatchPointsCard({
         {vsAiLabel ? `Contra a IA (${vsAiLabel}) · ` : ''}
         {outcome} <span className="text-slate-500">· {reason}</span>
       </div>
-      {mine && mine.counted && (
+      {mine && mine.counted && mine.delta > 0 && (
         <div className="font-display font-extrabold text-3xl text-[#00E676] tabular-nums">
           {mine.delta >= 0 ? '+' : ''}
           {mine.delta} pts

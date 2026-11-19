@@ -47,6 +47,8 @@ export interface FinishMatchInput {
   reason: string;
   /** jogadas completas */
   moves: number;
+  /** duracao da partida em ms (define os pontos de quem perde) */
+  durationMs?: number;
 }
 
 export interface FinishAiMatchInput {

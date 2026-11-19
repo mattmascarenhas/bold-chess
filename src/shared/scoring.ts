@@ -2,12 +2,22 @@ import type { MatchResult } from './protocol';
 
 export const POINTS = {
   win: 30,
+  /** derrota sem tempo medido (partidas antigas): valor fixo */
   loss: 10,
   draw: 15,
   upsetBonus: 5,
 } as const;
 
 export const MIN_MOVES_TO_COUNT = 10;
+
+/** Derrota contra jogador: pontos pelo tempo jogado (1 por minuto, de 2 a 20). */
+export const LOSS_MIN = 2;
+export const LOSS_MAX = 20;
+
+export function lossPointsForDuration(durationMs: number | undefined): number {
+  if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) return POINTS.loss;
+  return Math.min(LOSS_MAX, Math.max(LOSS_MIN, Math.floor(durationMs / 60_000)));
+}
 export const MAX_PAIR_MATCHES_PER_DAY = 5;
 
 export interface ScoreInput {
@@ -21,6 +31,8 @@ export interface ScoreInput {
   moves: number;
   /** Partidas ja pontuadas hoje entre os dois */
   pairMatchesToday: number;
+  /** Duracao da partida em ms (da entrada do 2o jogador ate o fim); define os pontos de quem perde */
+  durationMs?: number;
 }
 
 export interface ScoreOutput {
@@ -42,21 +54,20 @@ export function computeScore(i: ScoreInput): ScoreOutput {
   const loserPts = i.result === 'w' ? i.blackPoints : i.whitePoints;
   const win = POINTS.win + (loserPts > winnerPts ? POINTS.upsetBonus : 0);
 
-  return i.result === 'w'
-    ? { counted: true, white: win, black: POINTS.loss }
-    : { counted: true, white: POINTS.loss, black: win };
+  const loss = lossPointsForDuration(i.durationMs);
+  return i.result === 'w' ? { counted: true, white: win, black: loss } : { counted: true, white: loss, black: win };
 }
 
 // ---------- Partidas contra a IA ----------
 export type AiLevelId = 'facil' | 'medio' | 'dificil' | 'mestre' | 'deus';
 
-/** Pontos por nivel: vitoria vale bem mais nos niveis altos; derrota rende so uma participacao pequena. */
+/** Pontos por nivel: vitoria vale bem mais nos niveis altos; derrota contra a IA nao pontua. */
 export const AI_POINTS: Record<AiLevelId, { win: number; draw: number; loss: number }> = {
-  facil: { win: 5, draw: 2, loss: 1 },
-  medio: { win: 12, draw: 6, loss: 2 },
-  dificil: { win: 25, draw: 12, loss: 3 },
-  mestre: { win: 45, draw: 22, loss: 4 },
-  deus: { win: 80, draw: 40, loss: 5 },
+  facil: { win: 5, draw: 2, loss: 0 },
+  medio: { win: 12, draw: 6, loss: 0 },
+  dificil: { win: 25, draw: 12, loss: 0 },
+  mestre: { win: 45, draw: 22, loss: 0 },
+  deus: { win: 80, draw: 40, loss: 0 },
 };
 
 export const AI_MIN_MOVES_TO_COUNT = 10;

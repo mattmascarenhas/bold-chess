@@ -63,3 +63,17 @@ test('mesmo usuario nunca pontua (prioridade sobre os outros motivos)', () => {
     black: 0,
   });
 });
+
+test('derrota contra jogador: pontos pelo tempo da partida (1 por minuto, de 2 a 20)', () => {
+  const lose = (durationMs?: number) => run({ result: 'w', durationMs }).black;
+  assert.equal(lose(30_000), 2); // minimo
+  assert.equal(lose(5 * 60_000), 5);
+  assert.equal(lose(12 * 60_000 + 59_000), 12);
+  assert.equal(lose(60 * 60_000), 20); // teto
+  assert.equal(lose(undefined), 10); // sem tempo medido: valor antigo
+  // partida mais longa rende mais a quem perde, e a vitoria continua valendo mais
+  assert.ok(lose(15 * 60_000) > lose(4 * 60_000));
+  assert.ok(run({ result: 'w', durationMs: 60 * 60_000 }).white > lose(60 * 60_000));
+  // vale para quem joga de pretas tambem
+  assert.equal(run({ result: 'b', durationMs: 8 * 60_000 }).white, 8);
+});

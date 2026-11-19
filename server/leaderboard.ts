@@ -75,6 +75,7 @@ export function createLeaderboard(store: Store): Leaderboard {
           blackPoints: bPts,
           moves: input.moves,
           pairMatchesToday: pairToday,
+          durationMs: input.durationMs,
         });
         const rec: MatchRecord = {
           id: randomUUID(),

@@ -663,3 +663,20 @@ test('ai_match: partida forjada (lance ilegal ou sem fim) e recusada e nao pontu
   assert.equal(e.aiCalls.length, 0);
   await e.db.close();
 });
+
+test('duracao da partida (do 2o jogador sentar ate o fim) vai para a pontuacao, livre ou com tempo', async () => {
+  for (const time of [null, { baseMs: 600_000, incrementMs: 0 }]) {
+    const e = await setup({ absentGraceMs: 10 ** 9 });
+    const { ana, bruno, inv } = await timedDuel(e, time);
+    e.clock.t += 20_000; // espera o convidado aceitar: nao conta
+    await bruno.send({ type: 'invite_response', inviteId: inv.inviteId, accept: true });
+    await ana.poll();
+    assert.equal(ana.state!.startedAt, e.clock.t);
+    await playMoves(ana, bruno, 11);
+    e.clock.t += 7 * 60_000;
+    await bruno.send({ type: 'resign' });
+    assert.equal(e.calls.length, 1);
+    assert.equal(e.calls[0].durationMs, 7 * 60_000);
+    await e.db.close();
+  }
+});

@@ -256,6 +256,7 @@ export function createGame(deps: GameDeps): Game {
           result: next.winner as MatchResult,
           reason: opts.reason ?? next.endReason ?? 'unknown',
           moves: Math.max(0, next.fullMoveNumber - 1),
+          durationMs: next.startedAt ? Math.max(0, clock() - next.startedAt) : undefined,
         },
         recipients: opts.recipients ?? c.members.map((m) => m.user_id),
       };
@@ -316,7 +317,9 @@ export function createGame(deps: GameDeps): Game {
     // Com os dois jogadores sentados, o relogio (se houver) comeca a correr para as brancas.
     const seated = playersOf(c.members);
     if (seated.w && seated.b && c.room.state.clock && c.room.state.clock.turnStartedAt === null && !c.room.state.winner) {
-      await writeState(c, startClock(c.room.state, t));
+      await writeState(c, { ...startClock(c.room.state, t), startedAt: t });
+    } else if (seated.w && seated.b && !c.room.state.startedAt && !c.room.state.winner) {
+      await writeState(c, { ...c.room.state, startedAt: t }); // partida livre: marca o inicio para medir a duracao
     }
     return { seat, resumed: false };
   }
@@ -514,6 +517,7 @@ export function createGame(deps: GameDeps): Game {
           {
             const both = playersOf(c.members);
             const fresh = withClock(createInitialState(true), timeControlOf(state), both.w && both.b ? clock() : null);
+            if (both.w && both.b) fresh.startedAt = clock();
             await writeState(c, fresh, { resetScored: true });
           }
           return;

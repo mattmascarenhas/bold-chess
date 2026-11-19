@@ -14,7 +14,7 @@ const LOSS: AiAction[] = [m([6, 5], [5, 5]), m([1, 4], [3, 4]), m([6, 6], [4, 6]
 
 const user: PlayerIdentity = { userId: 'u1', name: 'Ana', avatarUrl: null, accountId: 'acc', workspaceId: 'ws' };
 
-test('pontos por dificuldade: vitoria cresce com o nivel; derrota rende pouco', () => {
+test('pontos por dificuldade: vitoria cresce com o nivel; derrota contra a IA nao pontua', () => {
   const levels = ['facil', 'medio', 'dificil', 'mestre', 'deus'] as const;
   for (let i = 1; i < levels.length; i++) {
     assert.ok(AI_POINTS[levels[i]].win > AI_POINTS[levels[i - 1]].win);
@@ -22,10 +22,9 @@ test('pontos por dificuldade: vitoria cresce com o nivel; derrota rende pouco', 
   }
   for (const l of levels) {
     const p = AI_POINTS[l];
-    assert.ok(p.win > p.draw && p.draw > p.loss && p.loss > 0);
+    assert.ok(p.win > p.draw && p.draw > 0);
+    assert.equal(p.loss, 0);
   }
-  // perder no Deus nunca rende mais que ganhar no Facil (sem farm de derrota)
-  assert.ok(AI_POINTS.deus.loss <= AI_POINTS.facil.win);
 });
 
 test('computeAiScore: minimo de jogadas, limite diario e teto de pontos', () => {
@@ -35,7 +34,7 @@ test('computeAiScore: minimo de jogadas, limite diario e teto de pontos', () => 
   assert.equal(computeAiScore({ ...base, gamesToday: AI_MAX_GAMES_PER_DAY }).reason, 'daily_limit');
   assert.equal(computeAiScore({ ...base, pointsToday: AI_MAX_POINTS_PER_DAY }).reason, 'daily_limit');
   assert.equal(computeAiScore({ ...base, pointsToday: AI_MAX_POINTS_PER_DAY - 30 }).delta, 30);
-  assert.equal(computeAiScore({ ...base, level: 'medio', outcome: 'loss' }).delta, AI_POINTS.medio.loss);
+  assert.deepEqual(computeAiScore({ ...base, level: 'deus', outcome: 'loss' }), { counted: true, delta: 0 });
 });
 
 test('verifyAiGame: repete a partida e deduz vitoria, derrota e desistencia', () => {
@@ -105,7 +104,7 @@ test('finishAiMatch: pontua por nivel, grava a partida e nao poe a IA no ranking
   assert.equal(b.delta, 5);
   assert.equal(b.total, 85);
   const c = await lb.finishAiMatch({ user, level: 'mestre', outcome: 'loss', reason: 'checkmate', moves: 25 });
-  assert.equal(c.delta, 4);
+  assert.deepEqual({ d: c.delta, t: c.total, c: c.counted }, { d: 0, t: 85, c: true }); // derrota: 0 pontos, mas conta como derrota
   const d = await lb.finishAiMatch({ user, level: 'deus', outcome: 'win', reason: 'checkmate', moves: 4 });
   assert.deepEqual({ c: d.counted, r: d.reason }, { c: false, r: 'too_short' });
   const e = await lb.finishAiMatch({ user, level: 'nivel-falso', outcome: 'win', reason: 'x', moves: 30 });
@@ -113,7 +112,7 @@ test('finishAiMatch: pontua por nivel, grava a partida e nao poe a IA no ranking
 
   const top = await store.getTop(10);
   assert.deepEqual(top.map((x) => x.userId), ['u1']); // so o jogador, sem 'ai:...'
-  assert.equal(top[0].points, 89);
+  assert.equal(top[0].points, 85);
   assert.equal(top[0].wins, 2);
   assert.equal(top[0].losses, 1);
   const recent = await store.recentMatches(10);

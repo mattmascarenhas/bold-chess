@@ -181,6 +181,8 @@ export interface GameState {
   capturedBy: Record<Color, PieceKind[]>;
   history: MoveRecord[];
   positionHistory?: string[];
+  /** Quando a partida comecou (os dois jogadores sentados); usado para medir a duracao. */
+  startedAt?: number;
   /** Semente do sorteio das pecas especiais oferecidas; muda a cada jogada. */
   offerSeed?: number;
   /** Relogio da partida; ausente = modo livre (sem tempo). */
