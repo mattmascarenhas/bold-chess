@@ -12,6 +12,8 @@ export interface IncomingInvite {
   expiresAt: number;
   /** controle de tempo proposto; null/ausente = livre */
   time?: TimeControl | null;
+  /** xadrez classico (sem pecas especiais) */
+  classic?: boolean;
 }
 
 export interface Notice {
@@ -59,7 +61,7 @@ function InviteCard({
             <Swords className="w-3 h-3 text-[#00E676]" /> te desafiou para uma partida
           </div>
           <div className="text-[11px] font-semibold text-[#00E676] mt-0.5">
-            Modo: {invite.time ? describeTimeControl(invite.time) + ' por jogador' : 'Livre (sem tempo)'}
+            {invite.classic ? 'Clássico' : 'Bold'} · {invite.time ? describeTimeControl(invite.time) + ' por jogador' : 'Livre (sem tempo)'}
           </div>
         </div>
         <span className="font-mono-tabular text-xs text-amber-300 shrink-0" aria-label="Segundos restantes">

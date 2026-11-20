@@ -306,6 +306,9 @@ export function Lobby({
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700/60 text-slate-200">
                         {describeTimeControl(r.time)}
                       </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300">
+                        {r.classic ? 'Clássico' : 'Bold'}
+                      </span>
                       {r.spectatorCount > 0 && (
                         <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-slate-400">
                           <Eye className="w-3 h-3" /> {r.spectatorCount}

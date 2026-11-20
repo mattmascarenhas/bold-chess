@@ -187,6 +187,8 @@ export interface GameState {
   offerSeed?: number;
   /** Relogio da partida; ausente = modo livre (sem tempo). */
   clock?: ClockState;
+  /** Modo xadrez classico: sem pecas especiais (sem convocacao); promocao normal. */
+  classic?: boolean;
 }
 
 export interface SpecialMeta {

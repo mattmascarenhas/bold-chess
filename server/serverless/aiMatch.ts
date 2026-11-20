@@ -15,9 +15,9 @@ const inB = (n: unknown): n is number => Number.isInteger(n) && (n as number) >=
 const sq = (v: unknown): v is [number, number] => Array.isArray(v) && v.length === 2 && inB(v[0]) && inB(v[1]);
 
 /** Repete a partida (jogador = brancas) e devolve o resultado do ponto de vista do jogador. */
-export function verifyAiGame(actions: unknown, outcome?: unknown): AiVerdict {
+export function verifyAiGame(actions: unknown, outcome?: unknown, classic = false): AiVerdict {
   if (!Array.isArray(actions) || actions.length === 0 || actions.length > MAX_AI_ACTIONS) return { ok: false, why: 'actions' };
-  let st: GameState = createInitialState(true);
+  let st: GameState = createInitialState(true, classic);
 
   for (const raw of actions as AiAction[]) {
     if (!raw || typeof raw !== 'object') return { ok: false, why: 'shape' };

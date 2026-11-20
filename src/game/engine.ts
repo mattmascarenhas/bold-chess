@@ -80,6 +80,7 @@ export function cloneState(state: GameState): GameState {
     positionHistory: state.positionHistory ? [...state.positionHistory] : [],
     ...(state.offerSeed !== undefined ? { offerSeed: state.offerSeed } : {}),
     ...(state.startedAt !== undefined ? { startedAt: state.startedAt } : {}),
+    ...(state.classic ? { classic: true } : {}),
     ...(state.clock ? { clock: { ...state.clock, remaining: { ...state.clock.remaining } } } : {}),
   };
 }
@@ -121,7 +122,7 @@ export function createInitialBoard(): (Piece | null)[][] {
 
 export const MAX_SPECIALS_PER_PLAYER = 3;
 
-export function createInitialState(_skipDraftWithDefault = true): GameState {
+export function createInitialState(_skipDraftWithDefault = true, classic = false): GameState {
   return {
     board: createInitialBoard(),
     turn: 'w',
@@ -149,6 +150,7 @@ export function createInitialState(_skipDraftWithDefault = true): GameState {
     history: [],
     positionHistory: [],
     offerSeed: newOfferSeed(),
+    ...(classic ? { classic: true } : {}),
   };
 }
 
@@ -247,6 +249,7 @@ export function getConvocationOffer(state: GameState, color: Color): SpecialId[]
 }
 
 export function getAvailableSquadSpecials(state: GameState, color: Color): SpecialId[] {
+  if (state.classic) return [];
   if (hasActiveFriendlySpecial(state, color)) return [];
   const used = state.usedSpecials[color];
   if (used.length >= MAX_SPECIALS_PER_PLAYER) return [];

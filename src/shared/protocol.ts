@@ -28,6 +28,8 @@ export interface RoomSummary {
   phase: 'waiting' | 'playing' | 'finished';
   /** controle de tempo da sala; null/ausente = livre */
   time?: TimeControl | null;
+  /** xadrez classico (sem pecas especiais) */
+  classic?: boolean;
 }
 
 export interface OnlineUser extends PlayerIdentity {
@@ -52,10 +54,10 @@ export type MatchResult = 'w' | 'b' | 'draw';
 export type ClientMessage =
   | { type: 'auth'; token: string }
   | { type: 'lobby_list' }
-  | { type: 'create_room'; sceneRoom?: SceneRoomId; time?: TimeControl | null }
+  | { type: 'create_room'; sceneRoom?: SceneRoomId; time?: TimeControl | null; classic?: boolean }
   | { type: 'join'; roomId: string; asSpectator?: boolean }
   | { type: 'leave' }
-  | { type: 'challenge'; targetUserId: string; sceneRoom?: SceneRoomId; time?: TimeControl | null }
+  | { type: 'challenge'; targetUserId: string; sceneRoom?: SceneRoomId; time?: TimeControl | null; classic?: boolean }
   | { type: 'invite_response'; inviteId: string; accept: boolean }
   | { type: 'draft_pick'; specialId: SpecialId }
   | { type: 'auto_draft' }
@@ -64,7 +66,7 @@ export type ClientMessage =
   | { type: 'resign' }
   | { type: 'rematch' }
   | { type: 'emote'; emoteId: string }
-  | { type: 'ai_match'; level: string; actions: AiAction[]; outcome?: 'resign' | 'timeout' }
+  | { type: 'ai_match'; level: string; actions: AiAction[]; outcome?: 'resign' | 'timeout'; classic?: boolean }
   | { type: 'ping' };
 
 /** Acao de uma partida contra a IA (jogador = brancas). Enviada ao fim da partida para conferencia e pontuacao. */
@@ -91,7 +93,7 @@ export type ServerMessage =
   | { type: 'left' }
   | { type: 'state'; state: GameState; event?: unknown; convocation?: string }
   | { type: 'emote'; emoteId: string; fromColor: Color }
-  | { type: 'invite'; inviteId: string; from: PlayerIdentity; roomId: string; sceneRoom: SceneRoomId; expiresAt: number; time?: TimeControl | null }
+  | { type: 'invite'; inviteId: string; from: PlayerIdentity; roomId: string; sceneRoom: SceneRoomId; expiresAt: number; time?: TimeControl | null; classic?: boolean }
   | { type: 'invite_result'; inviteId: string; status: 'accepted' | 'declined' | 'expired' | 'offline'; roomId?: string }
   | { type: 'match_ended'; roomId: string; result: MatchResult; reason: string; points: PointsAward[] }
   | { type: 'error'; code: ErrorCode; message?: string }

@@ -39,10 +39,23 @@ const KIND_LABEL: Record<string, string> = {
 const ABILITY_KINDS = new Set(['push', 'kick', 'arrest', 'decree', 'pass']);
 
 // ---------- Historico ----------
-const GLYPH: Record<'w' | 'b', Record<ClassicKind, string>> = {
-  w: { p: '♙', n: '♘', b: '♗', r: '♖', q: '♕', k: '♔' },
-  b: { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛', k: '♚' },
+/** Silhuetas das pecas classicas (SVG, mesmo desenho para as duas cores). */
+const SILHOUETTE: Record<ClassicKind, string> = {
+  p: 'M12 4.2a3.1 3.1 0 0 1 1.7 5.7c1.5.8 2.6 2.7 2.8 4.6H17.5v2.2H6.5v-2.2h1c.2-1.9 1.3-3.8 2.8-4.6A3.1 3.1 0 0 1 12 4.2ZM5.5 18.4h13V20h-13z',
+  n: 'M7 19.8c0-3.2.9-5.4 3.2-7.5-1 .3-2 .9-3 1.7L5.8 12 10.9 6.6l.6-2.6 1.8 1.3 1.8-.8c2.5 1.6 4 4.2 4 8.7v4.6zM5.5 18.4h13V20h-13z',
+  b: 'M12 2.8c2.6 2 4 3.9 4 6.1 0 1.3-.6 2.3-1.5 3h1.2v1.9h-2.1c.2 1.2.7 2 1.5 2.7v1.4H8.9v-1.4c.8-.7 1.3-1.5 1.5-2.7H8.3v-1.9h1.2c-.9-.7-1.5-1.7-1.5-3 0-2.2 1.4-4.1 4-6.1ZM5.5 18.4h13V20h-13z',
+  r: 'M6.2 4h2.4v2h1.9V4h3v2h1.9V4h2.4v5.2l-1.9 1.5v5.1l1.5 1.1V18H6.6v-1.1l1.5-1.1v-5.1L6.2 9.2zM5.5 18.4h13V20h-13z',
+  q: 'M4.2 7.8l3.4 5.2 1.4-6.3L12 12l3-5.3 1.4 6.3 3.4-5.2-1.7 9.6H5.9zM5.5 17.8h13V20h-13z',
+  k: 'M11 2.5h2v2h2v2h-2v2.3c2.4.7 4.1 2.6 4.1 4.8 0 1-.4 2-1 2.8l1 .9v2.2H6.9V17.3l1-.9c-.6-.8-1-1.8-1-2.8 0-2.2 1.7-4.1 4.1-4.8V6.5H9v-2h2z',
 };
+
+function ClassicGlyph({ kind, size }: { kind: ClassicKind; size: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
+      <path d={SILHOUETTE[kind]} />
+    </svg>
+  );
+}
 
 /** Icone da peca: simbolo para as classicas, emblema colorido para as especiais. */
 function PieceBadge({ kind, color, size = 26 }: { kind: PieceKind; color: 'w' | 'b'; size?: number }) {
@@ -68,12 +81,12 @@ function PieceBadge({ kind, color, size = 26 }: { kind: PieceKind; color: 'w' | 
   return (
     <span
       className={`rounded-md flex items-center justify-center shrink-0 leading-none ${
-        color === 'w' ? 'bg-slate-200/15 border border-slate-300/40 text-white' : 'bg-slate-950/60 border border-slate-600 text-slate-200'
+        color === 'w' ? 'bg-slate-100 border border-white text-slate-800' : 'bg-slate-800 border border-slate-500 text-slate-100'
       }`}
-      style={{ width: size, height: size, fontSize: size * 0.72 }}
+      style={{ width: size, height: size }}
       title={getPieceDisplayName(kind)}
     >
-      {GLYPH[color][kind as ClassicKind]}
+      <ClassicGlyph kind={kind as ClassicKind} size={Math.round(size * 0.82)} />
     </span>
   );
 }
@@ -228,7 +241,11 @@ function PieceInfo({
       </div>
 
       <p className="text-[11px] text-slate-300 leading-snug">
-        {special ? special.movementSummary : CLASSIC_DESC[piece.kind as ClassicKind] ?? CLASSIC_NAMES[piece.kind as ClassicKind]}
+        {special
+          ? special.movementSummary
+          : piece.kind === 'p' && gameState.classic
+            ? 'Anda 1 casa para a frente (2 no primeiro lance) e captura na diagonal. Na última fileira é promovido.'
+            : CLASSIC_DESC[piece.kind as ClassicKind] ?? CLASSIC_NAMES[piece.kind as ClassicKind]}
       </p>
 
       {special?.abilityName && (

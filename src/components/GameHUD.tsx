@@ -1,17 +1,27 @@
 import { useState } from 'react';
 import {
+  Baby,
   BookOpen,
   ChevronDown,
   ChevronUp,
   Copy,
   Check,
+  Crown,
   Flag,
+  Flame,
+  Hand,
+  MessageCircleHeart,
   MessageSquare,
   Pause,
+  PartyPopper,
+  Rocket,
   Sparkles,
+  Trophy,
   Volume2,
   VolumeX,
   X,
+  Zap,
+  type LucideIcon,
 } from 'lucide-react';
 import {
   Color,
@@ -27,6 +37,18 @@ import {
   isSpecialKind,
 } from '../game/types';
 import { CameraPreset } from '../three/ChessScene';
+
+/** Icone e cor de cada emote (em vez de so texto). */
+const EMOTE_VISUAL: Record<string, { Icon: LucideIcon; color: string }> = {
+  mim_de_papai: { Icon: Baby, color: '#F472B6' },
+  receba: { Icon: Trophy, color: '#FBBF24' },
+  que_isso: { Icon: Hand, color: '#38BDF8' },
+  tome: { Icon: Zap, color: '#A78BFA' },
+  bora_bill: { Icon: Rocket, color: '#34D399' },
+  uiuiui: { Icon: PartyPopper, color: '#FB923C' },
+  eita_giovanna: { Icon: Flame, color: '#F87171' },
+  fala_comigo: { Icon: MessageCircleHeart, color: '#2DD4BF' },
+};
 
 interface GameHUDProps {
   gameState: GameState;
@@ -143,7 +165,14 @@ export function GameHUD({
               <span>{SCENE_ROOMS.find((r) => r.id === sceneRoom)?.name ?? 'Sala da Bold'}</span>
             </div>
 
+            {gameState.classic && (
+              <div className="flex items-center gap-1.5 pt-1 border-t border-slate-800/80 text-[11px] font-semibold text-[#00E676]">
+                <Crown className="w-3.5 h-3.5" aria-hidden="true" /> Xadrez clássico
+              </div>
+            )}
+
             {/* Convocation Slots Status (3 choices from 10 specials) */}
+            {!gameState.classic && (
             <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-800/80">
               <span className="text-[11px] font-semibold text-[#00E676] tabular-nums">
                 Especiais {myUsedSpecials.length}/3
@@ -172,6 +201,7 @@ export function GameHUD({
                 })
               )}
             </div>
+            )}
 
             {/* Multiplayer Share Link */}
             {mode === 'multiplayer' && roomId && (
@@ -232,18 +262,21 @@ export function GameHUD({
             {muted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4" />}
           </button>
 
-          <button
-            type="button"
-            tabIndex={-1}
-            onClick={(e) => {
-              e.currentTarget.blur();
-              setGuideOpen((prev) => !prev);
-            }}
-            aria-label="Manual das peças especiais"
-            className="w-10 h-10 rounded-xl bg-[#090E1A]/92 border border-slate-700/70 hover:border-[#00E5C3] text-slate-200 flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <BookOpen className="w-4 h-4" />
-          </button>
+          {!gameState.classic && (
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                setGuideOpen((prev) => !prev);
+              }}
+              aria-label="Manual das peças especiais"
+              title="Manual das peças especiais"
+              className="w-10 h-10 rounded-xl bg-[#090E1A]/92 border border-slate-700/70 hover:border-[#00E5C3] text-slate-200 flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <BookOpen className="w-4 h-4" />
+            </button>
+          )}
 
           <button
             type="button"
@@ -279,21 +312,33 @@ export function GameHUD({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-              {MEME_EMOTES.map((em) => (
-                <button
-                  key={em.id}
-                  type="button"
-                  disabled={emoteCooldownSec > 0}
-                  onClick={() => {
-                    onSendEmote(em.id);
-                    setEmotesOpen(false);
-                  }}
-                  className="px-2.5 py-2 rounded-lg bg-slate-800/90 hover:bg-[#0047A0] disabled:opacity-45 text-xs font-medium text-slate-100 text-left transition-colors cursor-pointer truncate"
-                >
-                  {em.label}
-                </button>
-              ))}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {MEME_EMOTES.map((em) => {
+                const vis = EMOTE_VISUAL[em.id];
+                const Icon = vis?.Icon ?? MessageSquare;
+                const color = vis?.color ?? '#00E676';
+                return (
+                  <button
+                    key={em.id}
+                    type="button"
+                    disabled={emoteCooldownSec > 0}
+                    onClick={() => {
+                      onSendEmote(em.id);
+                      setEmotesOpen(false);
+                    }}
+                    title={em.speech}
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/90 border border-slate-700 hover:border-slate-500 disabled:opacity-45 disabled:cursor-not-allowed text-left transition-colors cursor-pointer"
+                  >
+                    <span
+                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: `${color}26`, border: `1px solid ${color}66`, color }}
+                    >
+                      <Icon className="w-4 h-4" aria-hidden="true" />
+                    </span>
+                    <span className="text-[11px] font-semibold text-slate-100 leading-tight">{em.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

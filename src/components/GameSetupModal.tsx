@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Brain, Clock, Flame, Infinity as InfinityIcon, X } from 'lucide-react';
+import { Brain, Clock, Crown, Flame, Infinity as InfinityIcon, Sparkles, X } from 'lucide-react';
 import { AI_LEVELS, AIDifficulty, DEFAULT_AI_LEVEL } from '../game/ai';
 import {
   MAX_BASE_MS,
@@ -53,13 +53,32 @@ function saveLastAILevel(level: AIDifficulty): void {
   }
 }
 
+const CLASSIC_KEY = 'bold-chess:classic';
+
+/** Ultima variante escolhida (true = xadrez classico). */
+export function loadLastClassic(): boolean {
+  try {
+    return window.localStorage.getItem(CLASSIC_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveLastClassic(v: boolean): void {
+  try {
+    window.localStorage.setItem(CLASSIC_KEY, v ? '1' : '0');
+  } catch {
+    /* ignora */
+  }
+}
+
 interface GameSetupModalProps {
   /** mostra a escolha de dificuldade (partida contra a IA) */
   showDifficulty?: boolean;
   title: string;
   subtitle?: string;
   confirmLabel: string;
-  onConfirm: (tc: TimeControl | null, level: AIDifficulty) => void;
+  onConfirm: (tc: TimeControl | null, level: AIDifficulty, classic: boolean) => void;
   onCancel: () => void;
 }
 
@@ -70,6 +89,7 @@ const sameTc = (a: TimeControl | null, b: TimeControl | null) =>
 export function GameSetupModal({ title, subtitle, confirmLabel, showDifficulty, onConfirm, onCancel }: GameSetupModalProps) {
   const initial = useMemo(loadLastTimeControl, []);
   const [level, setLevel] = useState<AIDifficulty>(loadLastAILevel);
+  const [classic, setClassic] = useState<boolean>(loadLastClassic);
   const [timed, setTimed] = useState<boolean>(initial !== null);
   const [tc, setTc] = useState<TimeControl>(initial ?? TIME_PRESETS[3].tc);
   const [customMin, setCustomMin] = useState<string>(String(Math.round((initial ?? TIME_PRESETS[3].tc).baseMs / 60_000)));
@@ -105,7 +125,8 @@ export function GameSetupModal({ title, subtitle, confirmLabel, showDifficulty, 
     const result = timed ? tc : null;
     saveLastTimeControl(result);
     if (showDifficulty) saveLastAILevel(level);
-    onConfirm(result, level);
+    saveLastClassic(classic);
+    onConfirm(result, level, classic);
   };
 
   return (
@@ -175,6 +196,42 @@ export function GameSetupModal({ title, subtitle, confirmLabel, showDifficulty, 
               )}
             </div>
           )}
+
+          <div>
+            <div className="text-xs font-semibold text-slate-300 mb-2">Variante</div>
+            <div className="grid grid-cols-2 gap-2.5" role="radiogroup" aria-label="Variante">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={classic}
+                onClick={() => setClassic(true)}
+                className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer ${
+                  classic
+                    ? 'bg-[#00E676]/12 border-[#00E676] text-white'
+                    : 'bg-[#111C33] border-slate-700 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                <Crown className="w-5 h-5 mb-1.5 text-[#00E676]" />
+                <div className="font-display font-bold text-sm">Clássico</div>
+                <div className="text-[11px] text-slate-400 leading-snug">Xadrez de verdade, sem peças especiais.</div>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={!classic}
+                onClick={() => setClassic(false)}
+                className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer ${
+                  !classic
+                    ? 'bg-[#00E676]/12 border-[#00E676] text-white'
+                    : 'bg-[#111C33] border-slate-700 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                <Sparkles className="w-5 h-5 mb-1.5 text-[#00E676]" />
+                <div className="font-display font-bold text-sm">Bold</div>
+                <div className="text-[11px] text-slate-400 leading-snug">Convoque peças especiais da turma.</div>
+              </button>
+            </div>
+          </div>
 
           <div>
             <div className="text-xs font-semibold text-slate-300 mb-2">Modo de jogo</div>
@@ -279,7 +336,7 @@ export function GameSetupModal({ title, subtitle, confirmLabel, showDifficulty, 
           <div className="flex items-center justify-between gap-3 pt-1">
             <div className="text-xs text-slate-400">
               Modo escolhido:{' '}
-              <span className="font-semibold text-[#00E676]">{timed ? describeTimeControl(tc) : 'Livre (sem tempo)'}</span>
+              <span className="font-semibold text-[#00E676]">{classic ? 'Clássico' : 'Bold'} · {timed ? describeTimeControl(tc) : 'Livre (sem tempo)'}</span>
             </div>
             <div className="flex gap-2">
               <button

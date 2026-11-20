@@ -16,6 +16,7 @@ export interface PieceMaterialSet {
   blackTrim: THREE.MeshStandardMaterial;
   boldBadgeMat: THREE.MeshStandardMaterial;
   shadowDiscMat: THREE.MeshBasicMaterial;
+  darkDetail: THREE.MeshStandardMaterial;
   emblemCache: Map<string, THREE.MeshStandardMaterial>;
   dispose: () => void;
 }
@@ -70,6 +71,8 @@ export function createPieceMaterialSet(
     depthWrite: false,
   });
 
+  const darkDetail = new THREE.MeshStandardMaterial({ color: 0x080b12, roughness: 0.3, metalness: 0.4 });
+
   const emblemCache = new Map<string, THREE.MeshStandardMaterial>();
 
   return {
@@ -79,6 +82,7 @@ export function createPieceMaterialSet(
     blackTrim,
     boldBadgeMat,
     shadowDiscMat,
+    darkDetail,
     emblemCache,
     dispose: () => {
       whiteBody.dispose();
@@ -88,6 +92,7 @@ export function createPieceMaterialSet(
       badgeTex.dispose();
       boldBadgeMat.dispose();
       shadowDiscMat.dispose();
+      darkDetail.dispose();
       emblemCache.forEach((m) => {
         m.map?.dispose();
         m.dispose();
@@ -165,6 +170,68 @@ function addBaseAndBadge(
   group.add(badge);
 }
 
+const lathePool = new Map<string, THREE.LatheGeometry>();
+
+/** Perfil suavizado (spline) girado em torno do eixo Y. Cacheado: a geometria e compartilhada. */
+function smoothLathe(key: string, points: [number, number][], samples = 7, segments = 40): THREE.LatheGeometry {
+  const cached = lathePool.get(key);
+  if (cached) return cached;
+  const curve = new THREE.SplineCurve(points.map(([r, y]) => new THREE.Vector2(r, y)));
+  const pts = curve
+    .getPoints(points.length * samples)
+    .map((v) => new THREE.Vector2(Math.max(0.0005, v.x), v.y));
+  const geo = new THREE.LatheGeometry(pts, segments);
+  geo.computeVertexNormals();
+  lathePool.set(key, geo);
+  return geo;
+}
+
+let horseGeoCache: THREE.ExtrudeGeometry | null = null;
+let maneGeoCache: THREE.TubeGeometry | null = null;
+
+function getHorseGeometry(): THREE.ExtrudeGeometry {
+  if (horseGeoCache) return horseGeoCache;
+  // Perfil lateral do cavalo olhando para +x (x = frente, y = cima), 0..1 de altura.
+  const s = new THREE.Shape();
+  s.moveTo(-0.21, 0);
+  s.lineTo(0.21, 0);
+  s.quadraticCurveTo(0.27, 0.16, 0.14, 0.34); // peito / garganta
+  s.quadraticCurveTo(0.2, 0.42, 0.3, 0.47); // queixo
+  s.lineTo(0.4, 0.55); // focinho (base)
+  s.quadraticCurveTo(0.45, 0.63, 0.36, 0.7); // focinho (ponta)
+  s.lineTo(0.2, 0.8); // testa
+  s.lineTo(0.17, 1.0); // orelha (frente)
+  s.lineTo(0.07, 0.86); // orelha (tras)
+  s.bezierCurveTo(-0.08, 0.92, -0.22, 0.76, -0.22, 0.5); // crina
+  s.bezierCurveTo(-0.24, 0.34, -0.27, 0.14, -0.21, 0);
+  const geo = new THREE.ExtrudeGeometry(s, {
+    depth: 0.2,
+    bevelEnabled: true,
+    bevelThickness: 0.04,
+    bevelSize: 0.03,
+    bevelSegments: 4,
+    curveSegments: 14,
+  });
+  geo.translate(0, 0, -0.1);
+  geo.computeVertexNormals();
+  horseGeoCache = geo;
+  return geo;
+}
+
+function getManeGeometry(): THREE.TubeGeometry {
+  if (maneGeoCache) return maneGeoCache;
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0.06, 0.93, 0),
+    new THREE.Vector3(-0.1, 0.9, 0),
+    new THREE.Vector3(-0.21, 0.74, 0),
+    new THREE.Vector3(-0.25, 0.5, 0),
+    new THREE.Vector3(-0.26, 0.3, 0),
+    new THREE.Vector3(-0.23, 0.12, 0),
+  ]);
+  maneGeoCache = new THREE.TubeGeometry(curve, 24, 0.032, 8, false);
+  return maneGeoCache;
+}
+
 function buildClassicPiece(
   kind: ClassicKind,
   color: Color,
@@ -175,184 +242,189 @@ function buildClassicPiece(
   const bodyMat = color === 'w' ? mats.whiteBody : mats.blackBody;
   const trimMat = color === 'w' ? mats.whiteTrim : mats.blackTrim;
 
-  const baseRadius = kind === 'k' || kind === 'q' ? 0.37 : kind === 'p' ? 0.29 : 0.33;
+  const baseRadius = kind === 'k' ? 0.41 : kind === 'q' ? 0.39 : kind === 'p' ? 0.3 : 0.345;
   addBaseAndBadge(group, mats, baseRadius, color, castShadow);
 
+  const add = (mesh: THREE.Mesh, trim = false) => {
+    mesh.castShadow = castShadow && !trim;
+    group.add(mesh);
+    return mesh;
+  };
+
   if (kind === 'p') {
-    const stem = new THREE.Mesh(
-      latheFromProfile([
-        [0.24, 0.14],
-        [0.19, 0.26],
-        [0.11, 0.56],
-        [0.16, 0.6],
-        [0.1, 0.64],
-      ]),
-      bodyMat
+    add(
+      new THREE.Mesh(
+        smoothLathe('p', [
+          [0.25, 0.14],
+          [0.2, 0.2],
+          [0.14, 0.34],
+          [0.11, 0.5],
+          [0.13, 0.57],
+          [0.22, 0.61],
+          [0.22, 0.66],
+          [0.13, 0.7],
+          [0.1, 0.74],
+        ]),
+        bodyMat
+      )
     );
-    stem.castShadow = castShadow;
-    group.add(stem);
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.165, 22, 18), bodyMat);
-    head.position.y = 0.78;
-    head.castShadow = castShadow;
-    group.add(head);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.165, 28, 22), bodyMat);
+    head.position.y = 0.86;
+    add(head);
   } else if (kind === 'r') {
-    const body = new THREE.Mesh(
-      latheFromProfile([
-        [0.28, 0.14],
-        [0.24, 0.26],
-        [0.19, 0.72],
-        [0.25, 0.8],
-        [0.25, 0.94],
-        [0.17, 0.94],
-        [0.17, 0.85],
-        [0.01, 0.85],
-      ]),
-      bodyMat
+    add(
+      new THREE.Mesh(
+        smoothLathe('r', [
+          [0.3, 0.14],
+          [0.24, 0.22],
+          [0.19, 0.38],
+          [0.18, 0.72],
+          [0.2, 0.82],
+          [0.3, 0.88],
+          [0.3, 1.06],
+          [0.25, 1.08],
+          [0.22, 1.02],
+          [0.01, 1.0],
+        ])
+      , bodyMat)
     );
-    body.castShadow = castShadow;
-    group.add(body);
-
-    // 6 Castle battlements
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.205, 0.024, 10, 32), trimMat);
+    collar.rotation.x = Math.PI / 2;
+    collar.position.y = 0.8;
+    add(collar, true);
+    // 6 ameias
     for (let i = 0; i < 6; i++) {
-      const ang = (i / 6) * Math.PI * 2;
-      const merlon = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.1, 0.08), trimMat);
-      merlon.position.set(Math.cos(ang) * 0.21, 0.99, Math.sin(ang) * 0.21);
-      merlon.rotation.y = -ang;
-      merlon.castShadow = castShadow;
-      group.add(merlon);
+      const ang = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      const merlon = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.17, 0.1), bodyMat);
+      merlon.position.set(Math.cos(ang) * 0.265, 1.12, Math.sin(ang) * 0.265);
+      merlon.rotation.y = -ang + Math.PI / 2;
+      add(merlon);
     }
   } else if (kind === 'b') {
-    const stem = new THREE.Mesh(
-      latheFromProfile([
-        [0.28, 0.14],
-        [0.21, 0.3],
-        [0.13, 0.72],
-        [0.2, 0.78],
-        [0.14, 0.82],
-      ]),
-      bodyMat
+    add(
+      new THREE.Mesh(
+        smoothLathe('b', [
+          [0.31, 0.14],
+          [0.24, 0.22],
+          [0.16, 0.4],
+          [0.12, 0.72],
+          [0.14, 0.92],
+          [0.23, 0.97],
+          [0.23, 1.02],
+          [0.14, 1.07],
+          [0.19, 1.15],
+          [0.2, 1.28],
+          [0.14, 1.42],
+          [0.06, 1.5],
+          [0.005, 1.53],
+        ])
+      , bodyMat)
     );
-    stem.castShadow = castShadow;
-    group.add(stem);
-
-    const mitre = new THREE.Mesh(new THREE.SphereGeometry(0.19, 20, 18), bodyMat);
-    mitre.scale.set(0.88, 1.32, 0.88);
-    mitre.position.y = 1.0;
-    mitre.castShadow = castShadow;
-    group.add(mitre);
-
-    const sash = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.02, 8, 20), trimMat);
-    sash.position.y = 1.02;
-    sash.rotation.set(Math.PI / 3, 0, Math.PI / 6);
-    group.add(sash);
-
-    const finial = new THREE.Mesh(new THREE.SphereGeometry(0.055, 14, 12), trimMat);
-    finial.position.y = 1.27;
-    finial.castShadow = castShadow;
-    group.add(finial);
+    const sash = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.022, 8, 28), trimMat);
+    sash.position.y = 1.27;
+    sash.rotation.set(Math.PI / 2.5, 0, Math.PI / 5);
+    add(sash, true);
+    const finial = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 12), trimMat);
+    finial.position.y = 1.58;
+    add(finial, true);
   } else if (kind === 'n') {
-    const ped = new THREE.Mesh(
-      latheFromProfile([
-        [0.28, 0.14],
-        [0.23, 0.28],
-        [0.19, 0.36],
-        [0.01, 0.36],
-      ]),
-      bodyMat
+    add(
+      new THREE.Mesh(
+        smoothLathe('n', [
+          [0.34, 0.14],
+          [0.27, 0.22],
+          [0.22, 0.3],
+          [0.01, 0.31],
+        ])
+      , bodyMat)
     );
-    ped.castShadow = castShadow;
-    group.add(ped);
-
-    // Sculpted extruded horse profile
-    const shape = new THREE.Shape();
-    shape.moveTo(-0.17, 0);
-    shape.lineTo(0.17, 0);
-    shape.quadraticCurveTo(0.21, 0.2, 0.1, 0.38);
-    shape.lineTo(0.24, 0.42);
-    shape.quadraticCurveTo(0.28, 0.48, 0.21, 0.56);
-    shape.lineTo(0.08, 0.68);
-    shape.lineTo(0.04, 0.8); // Ear
-    shape.lineTo(-0.04, 0.72);
-    shape.bezierCurveTo(-0.24, 0.62, -0.25, 0.28, -0.17, 0);
-    shape.closePath();
-
-    const horseGeo = new THREE.ExtrudeGeometry(shape, {
-      depth: 0.14,
-      bevelEnabled: true,
-      bevelThickness: 0.035,
-      bevelSize: 0.028,
-      bevelSegments: 3,
-    });
-    horseGeo.center();
-    const horse = new THREE.Mesh(horseGeo, bodyMat);
-    horse.position.y = 0.72;
+    const horse = new THREE.Group();
+    horse.position.y = 0.3;
+    horse.scale.setScalar(1.04);
     horse.rotation.y = color === 'w' ? Math.PI / 2 : -Math.PI / 2;
-    horse.castShadow = castShadow;
-    group.add(horse);
-
-    // Mane crest accent
-    const crest = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.34, 0.08), trimMat);
-    crest.position.set(0, 0.76, color === 'w' ? 0.12 : -0.12);
-    crest.rotation.x = color === 'w' ? 0.25 : -0.25;
-    group.add(crest);
-  } else if (kind === 'q') {
-    const body = new THREE.Mesh(
-      latheFromProfile([
-        [0.32, 0.14],
-        [0.24, 0.34],
-        [0.15, 0.92],
-        [0.25, 1.02],
-        [0.22, 1.16],
-        [0.01, 1.16],
-      ]),
-      bodyMat
-    );
-    body.castShadow = castShadow;
-    group.add(body);
-
-    // 8 crown points
-    for (let i = 0; i < 8; i++) {
-      const ang = (i / 8) * Math.PI * 2;
-      const pearl = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), trimMat);
-      pearl.position.set(Math.cos(ang) * 0.21, 1.21, Math.sin(ang) * 0.21);
-      pearl.castShadow = castShadow;
-      group.add(pearl);
+    const head = new THREE.Mesh(getHorseGeometry(), bodyMat);
+    head.castShadow = castShadow;
+    horse.add(head);
+    const mane = new THREE.Mesh(getManeGeometry(), trimMat);
+    horse.add(mane);
+    for (const sz of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), mats.darkDetail);
+      eye.position.set(0.21, 0.74, sz * 0.13);
+      horse.add(eye);
+      const nostril = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), mats.darkDetail);
+      nostril.position.set(0.4, 0.62, sz * 0.09);
+      horse.add(nostril);
     }
-
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 14), trimMat);
-    dome.position.y = 1.24;
-    group.add(dome);
-  } else if (kind === 'k') {
-    const body = new THREE.Mesh(
-      latheFromProfile([
-        [0.32, 0.14],
-        [0.25, 0.36],
-        [0.16, 1.0],
-        [0.25, 1.12],
-        [0.2, 1.24],
-        [0.01, 1.24],
-      ]),
-      bodyMat
+    group.add(horse);
+  } else if (kind === 'q') {
+    add(
+      new THREE.Mesh(
+        smoothLathe('q', [
+          [0.35, 0.14],
+          [0.27, 0.24],
+          [0.18, 0.48],
+          [0.14, 0.88],
+          [0.16, 1.08],
+          [0.26, 1.13],
+          [0.26, 1.18],
+          [0.17, 1.23],
+          [0.2, 1.34],
+          [0.28, 1.5],
+          [0.29, 1.56],
+          [0.2, 1.56],
+          [0.01, 1.5],
+        ])
+      , bodyMat)
     );
-    body.castShadow = castShadow;
-    group.add(body);
-
-    const crownBand = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.025, 10, 24), trimMat);
-    crownBand.rotation.x = Math.PI / 2;
-    crownBand.position.y = 1.14;
-    group.add(crownBand);
-
-    // Beveled cross finial
-    const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.24, 0.06), trimMat);
-    crossV.position.y = 1.38;
-    crossV.castShadow = castShadow;
-    group.add(crossV);
-
-    const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.055, 0.06), trimMat);
-    crossH.position.y = 1.41;
-    crossH.castShadow = castShadow;
-    group.add(crossH);
+    // coroa: 9 pontas com perolas
+    for (let i = 0; i < 9; i++) {
+      const ang = (i / 9) * Math.PI * 2;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.2, 10), bodyMat);
+      spike.position.set(Math.cos(ang) * 0.245, 1.64, Math.sin(ang) * 0.245);
+      spike.rotation.set(Math.sin(ang) * 0.18, 0, -Math.cos(ang) * 0.18);
+      add(spike);
+      const pearl = new THREE.Mesh(new THREE.SphereGeometry(0.042, 12, 10), trimMat);
+      pearl.position.set(Math.cos(ang) * 0.255, 1.76, Math.sin(ang) * 0.255);
+      add(pearl, true);
+    }
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.022, 10, 32), trimMat);
+    band.rotation.x = Math.PI / 2;
+    band.position.y = 1.4;
+    add(band, true);
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 14), trimMat);
+    orb.position.y = 1.6;
+    add(orb, true);
+  } else if (kind === 'k') {
+    add(
+      new THREE.Mesh(
+        smoothLathe('k', [
+          [0.36, 0.14],
+          [0.28, 0.24],
+          [0.19, 0.5],
+          [0.15, 0.95],
+          [0.17, 1.15],
+          [0.27, 1.2],
+          [0.27, 1.25],
+          [0.18, 1.3],
+          [0.22, 1.42],
+          [0.29, 1.58],
+          [0.29, 1.64],
+          [0.2, 1.68],
+          [0.01, 1.7],
+        ])
+      , bodyMat)
+    );
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.024, 10, 32), trimMat);
+    band.rotation.x = Math.PI / 2;
+    band.position.y = 1.5;
+    add(band, true);
+    // cruz grande
+    const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.34, 0.075), trimMat);
+    crossV.position.y = 1.9;
+    add(crossV, true);
+    const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.075, 0.075), trimMat);
+    crossH.position.y = 1.96;
+    add(crossH, true);
   }
 
   return group;
@@ -583,112 +655,228 @@ export function buildChessPieceMesh(
   return buildClassicPiece(kind, color, mats, castShadow);
 }
 
+export type RobotEyeKind = 'happy' | 'open' | 'sad' | 'half' | 'heart';
+
+/** Referencias das partes do Robozinho para o animador (sem recriar meshes a cada frame). */
+export interface BoldRobotRig {
+  root: THREE.Group;
+  /** pivo animado (deslocamento/rotacao/escala do corpo todo) */
+  body: THREE.Group;
+  head: THREE.Group;
+  torso: THREE.Mesh;
+  leftArm: THREE.Group;
+  rightArm: THREE.Group;
+  leftAntenna: THREE.Group;
+  rightAntenna: THREE.Group;
+  eyeSets: Record<RobotEyeKind, THREE.Group>;
+  /** grupo que escala os dois olhos (piscar / arregalar) */
+  eyeRoot: THREE.Group;
+  dots: THREE.Group;
+  visorMat: THREE.MeshPhysicalMaterial;
+  mintMat: THREE.MeshStandardMaterial;
+  dispose: () => void;
+}
+
 /**
- * Builds the 3D Robôzinho da Bold mascot matching the reference image:
- * Satin white head/body, royal blue visor, neon green rim & ears, cyan curved eyes,
- * and Bold chest shield.
+ * Robozinho da Bold: corpo branco acetinado, visor azul, aro/antenas verde neon, olhos ciano
+ * e escudo Bold no peito. Devolve o rig com pivos nomeados (ombros, pescoco, antenas) e varios
+ * conjuntos de olhos (alternados pelo animador).
  */
-export function createBoldRobot3D(
-  mats: PieceMaterialSet,
-  castShadow: boolean
-): THREE.Group {
+export function createBoldRobot3D(mats: PieceMaterialSet, castShadow: boolean): BoldRobotRig {
   const root = new THREE.Group();
+  const body = new THREE.Group();
+  root.add(body);
 
-  const whiteShell = new THREE.MeshPhysicalMaterial({
-    color: 0xf4f7fb,
-    roughness: 0.24,
-    metalness: 0.12,
-    clearcoat: 0.7,
-  });
+  const owned: { dispose: () => void }[] = [];
+  const own = <T extends { dispose: () => void }>(o: T): T => {
+    owned.push(o);
+    return o;
+  };
 
-  const visorBlue = new THREE.MeshPhysicalMaterial({
-    color: 0x002d9c,
-    roughness: 0.08,
-    metalness: 0.2,
-    clearcoat: 1.0,
-    emissive: 0x001e7a,
-    emissiveIntensity: 0.6,
-  });
+  const whiteShell = own(
+    new THREE.MeshPhysicalMaterial({ color: 0xf4f7fb, roughness: 0.24, metalness: 0.12, clearcoat: 0.7 })
+  );
+  const visorMat = own(
+    new THREE.MeshPhysicalMaterial({
+      color: 0x002d9c,
+      roughness: 0.08,
+      metalness: 0.2,
+      clearcoat: 1.0,
+      emissive: 0x001e7a,
+      emissiveIntensity: 0.6,
+    })
+  );
+  const mintMat = own(
+    new THREE.MeshStandardMaterial({
+      color: 0x00e676,
+      emissive: 0x00e676,
+      emissiveIntensity: 0.75,
+      roughness: 0.25,
+      metalness: 0.2,
+    })
+  );
+  const eyeGlow = own(new THREE.MeshBasicMaterial({ color: 0x7df9ff }));
+  const heartMat = own(new THREE.MeshBasicMaterial({ color: 0xff5c9a }));
+  const pupilMat = own(new THREE.MeshBasicMaterial({ color: 0x06122e }));
 
-  const mintGlow = new THREE.MeshStandardMaterial({
-    color: 0x00e676,
-    emissive: 0x00e676,
-    emissiveIntensity: 0.75,
-    roughness: 0.25,
-    metalness: 0.2,
-  });
-
-  const eyeGlow = new THREE.MeshBasicMaterial({ color: 0x7df9ff });
-
-  // Tapered capsule body
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.36, 0.32, 8, 20), whiteShell);
+  // Torso
+  const torso = new THREE.Mesh(own(new THREE.CapsuleGeometry(0.36, 0.32, 8, 20)), whiteShell);
   torso.position.y = 0.56;
   torso.castShadow = castShadow;
-  root.add(torso);
+  body.add(torso);
 
-  // Chest shield badge
-  const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.14, 0.06, 6), mintGlow);
+  const shield = new THREE.Mesh(own(new THREE.CylinderGeometry(0.2, 0.14, 0.06, 6)), mintMat);
   shield.rotation.x = Math.PI / 2;
   shield.position.set(0, 0.62, 0.34);
-  root.add(shield);
+  body.add(shield);
 
-  const badge = new THREE.Mesh(new THREE.CircleGeometry(0.11, 16), mats.boldBadgeMat);
+  const badge = new THREE.Mesh(own(new THREE.CircleGeometry(0.11, 16)), mats.boldBadgeMat);
   badge.position.set(0, 0.62, 0.375);
-  root.add(badge);
+  body.add(badge);
 
-  // Stubby floating arms
-  for (const sx of [-0.46, 0.46]) {
-    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.22, 6, 12), whiteShell);
-    arm.position.set(sx, 0.62, 0.04);
-    arm.rotation.z = sx < 0 ? 0.5 : -0.7;
+  // Bracos com pivo no ombro (pendem para baixo; o animador gira o pivo)
+  const armGeo = own(new THREE.CapsuleGeometry(0.1, 0.22, 6, 12));
+  const makeArm = (side: -1 | 1): THREE.Group => {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.42, 0.8, 0.04);
+    const arm = new THREE.Mesh(armGeo, whiteShell);
+    arm.position.set(0, -0.2, 0);
     arm.castShadow = castShadow;
-    root.add(arm);
-  }
+    pivot.add(arm);
+    const hand = new THREE.Mesh(own(new THREE.SphereGeometry(0.095, 12, 10)), mintMat);
+    hand.position.set(0, -0.4, 0);
+    pivot.add(hand);
+    body.add(pivot);
+    return pivot;
+  };
+  const leftArm = makeArm(-1);
+  const rightArm = makeArm(1);
 
-  // Head
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.46, 24, 20), whiteShell);
-  head.scale.set(1.14, 0.92, 0.96);
-  head.position.y = 1.24;
-  head.castShadow = castShadow;
-  root.add(head);
+  // Cabeca (pivo no "pescoco")
+  const head = new THREE.Group();
+  head.position.set(0, 0.95, 0);
+  body.add(head);
+  const hy = (y: number) => y - 0.95;
 
-  // Top head crest
-  const topCrest = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.22), whiteShell);
-  topCrest.position.y = 1.66;
-  root.add(topCrest);
+  const skull = new THREE.Mesh(own(new THREE.SphereGeometry(0.46, 24, 20)), whiteShell);
+  skull.scale.set(1.14, 0.92, 0.96);
+  skull.position.y = hy(1.24);
+  skull.castShadow = castShadow;
+  head.add(skull);
 
-  // Ear pods & green antennas
-  for (const sx of [-0.54, 0.54]) {
-    const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.12, 14), whiteShell);
+  const topCrest = new THREE.Mesh(own(new THREE.BoxGeometry(0.24, 0.12, 0.22)), whiteShell);
+  topCrest.position.y = hy(1.66);
+  head.add(topCrest);
+
+  const podGeo = own(new THREE.CylinderGeometry(0.12, 0.12, 0.12, 14));
+  const antGeo = own(new THREE.BoxGeometry(0.06, 0.28, 0.1));
+  const makeAntenna = (side: -1 | 1): THREE.Group => {
+    const pod = new THREE.Mesh(podGeo, whiteShell);
     pod.rotation.z = Math.PI / 2;
-    pod.position.set(sx, 1.24, 0);
-    root.add(pod);
+    pod.position.set(side * 0.54, hy(1.24), 0);
+    head.add(pod);
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.56, hy(1.32), 0);
+    const ant = new THREE.Mesh(antGeo, mintMat);
+    ant.position.y = 0.14;
+    pivot.add(ant);
+    head.add(pivot);
+    return pivot;
+  };
+  const leftAntenna = makeAntenna(-1);
+  const rightAntenna = makeAntenna(1);
 
-    const ant = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.1), mintGlow);
-    ant.position.set(sx * 1.04, 1.46, 0);
-    root.add(ant);
-  }
-
-  // Glowing visor & mint bezel
-  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 16), visorBlue);
+  const visor = new THREE.Mesh(own(new THREE.SphereGeometry(0.36, 20, 16)), visorMat);
   visor.scale.set(1.12, 0.76, 0.55);
-  visor.position.set(0, 1.24, 0.28);
-  root.add(visor);
+  visor.position.set(0, hy(1.24), 0.28);
+  head.add(visor);
 
-  const bezel = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.025, 10, 28), mintGlow);
+  const bezel = new THREE.Mesh(own(new THREE.TorusGeometry(0.35, 0.025, 10, 28)), mintMat);
   bezel.scale.set(1.12, 0.76, 1);
-  bezel.position.set(0, 1.24, 0.36);
-  root.add(bezel);
+  bezel.position.set(0, hy(1.24), 0.36);
+  head.add(bezel);
 
-  // Happy curved eyes (^ ^)
+  // Olhos: varios conjuntos alternados (so um visivel por vez)
+  const eyeRoot = new THREE.Group();
+  eyeRoot.position.set(0, hy(1.24), 0.48);
+  head.add(eyeRoot);
+
+  const eyeSets = {
+    happy: new THREE.Group(),
+    open: new THREE.Group(),
+    sad: new THREE.Group(),
+    half: new THREE.Group(),
+    heart: new THREE.Group(),
+  } as Record<RobotEyeKind, THREE.Group>;
+
+  const arcGeo = own(new THREE.TorusGeometry(0.065, 0.02, 8, 14, Math.PI));
+  const discGeo = own(new THREE.SphereGeometry(0.075, 14, 12));
+  const pupilGeo = own(new THREE.SphereGeometry(0.033, 10, 8));
+  const barGeo = own(new THREE.BoxGeometry(0.15, 0.032, 0.03));
+  const heartShape = new THREE.Shape();
+  heartShape.moveTo(0, -0.07);
+  heartShape.bezierCurveTo(-0.1, 0.0, -0.09, 0.09, 0, 0.045);
+  heartShape.bezierCurveTo(0.09, 0.09, 0.1, 0.0, 0, -0.07);
+  const heartGeo = own(new THREE.ShapeGeometry(heartShape, 10));
+
   for (const ex of [-0.14, 0.14]) {
-    const eye = new THREE.Mesh(
-      new THREE.TorusGeometry(0.065, 0.02, 8, 14, Math.PI),
-      eyeGlow
-    );
-    eye.position.set(ex, 1.24, 0.48);
-    root.add(eye);
+    const s = ex < 0 ? -1 : 1;
+    const happy = new THREE.Mesh(arcGeo, eyeGlow);
+    happy.position.x = ex;
+    eyeSets.happy.add(happy);
+
+    const open = new THREE.Mesh(discGeo, eyeGlow);
+    open.position.x = ex;
+    open.scale.z = 0.5;
+    const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+    pupil.position.set(ex, 0, 0.04);
+    eyeSets.open.add(open, pupil);
+
+    const sad = new THREE.Mesh(barGeo, eyeGlow);
+    sad.position.x = ex;
+    sad.rotation.z = -s * 0.5;
+    eyeSets.sad.add(sad);
+
+    const half = new THREE.Mesh(barGeo, eyeGlow);
+    half.position.set(ex, -0.01, 0);
+    eyeSets.half.add(half);
+
+    const heart = new THREE.Mesh(heartGeo, heartMat);
+    heart.position.x = ex;
+    heart.scale.setScalar(1.15);
+    eyeSets.heart.add(heart);
+  }
+  for (const k of Object.keys(eyeSets) as RobotEyeKind[]) {
+    eyeSets[k].visible = k === 'happy';
+    eyeRoot.add(eyeSets[k]);
   }
 
-  return root;
+  // "Pensando": tres pontinhos no visor
+  const dots = new THREE.Group();
+  dots.visible = false;
+  const dotGeo = own(new THREE.SphereGeometry(0.035, 10, 8));
+  for (let i = -1; i <= 1; i++) {
+    const d = new THREE.Mesh(dotGeo, eyeGlow);
+    d.position.x = i * 0.12;
+    dots.add(d);
+  }
+  dots.position.set(0, hy(1.24) - 0.1, 0.49);
+  head.add(dots);
+
+  return {
+    root,
+    body,
+    head,
+    torso,
+    leftArm,
+    rightArm,
+    leftAntenna,
+    rightAntenna,
+    eyeSets,
+    eyeRoot,
+    dots,
+    visorMat,
+    mintMat,
+    dispose: () => owned.forEach((o) => o.dispose()),
+  };
 }

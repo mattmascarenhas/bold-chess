@@ -14,6 +14,8 @@ interface ConvocationModalProps {
   pending: PendingConvocation;
   usedCount: number;
   maxSpecials?: number;
+  /** xadrez classico: so promocao normal, sem pecas especiais */
+  classic?: boolean;
   onResolve: (choice: SpecialId | ClassicKind | 'keep_pawn') => void;
 }
 
@@ -21,6 +23,7 @@ export function ConvocationModal({
   pending,
   usedCount,
   maxSpecials = 3,
+  classic = false,
   onResolve,
 }: ConvocationModalProps) {
   const { isLastRank, availableSpecials } = pending;
@@ -57,19 +60,23 @@ export function ConvocationModal({
             </div>
             <div>
               <h3 className="font-display text-lg md:text-xl font-bold text-white">
-                {isLastRank ? 'Promoção na Última Fileira' : 'Convocação na 6ª Fileira'}
+                {classic ? 'Promoção do Peão' : isLastRank ? 'Promoção na Última Fileira' : 'Convocação na 6ª Fileira'}
               </h3>
               <p className="text-xs text-slate-400">
-                {isLastRank
+                {classic
+                  ? 'Escolha em qual peça o peão será promovido.'
+                  : isLastRank
                   ? 'Escolha uma peça clássica ou convoque 1 de 3 peças especiais da Bold.'
                   : 'Momento especial! Convoque 1 de 3 peças da equipe Bold ou continue rumo à Dama.'}
               </p>
             </div>
           </div>
 
-          <div className="px-3 py-1.5 rounded-lg bg-[#0047A0]/35 border border-[#38BDF8]/30 text-xs font-semibold text-[#00E676] tabular-nums">
-            Escolhas usadas: {usedCount}/{maxSpecials} · Restam {remainingSlots}
-          </div>
+          {!classic && (
+            <div className="px-3 py-1.5 rounded-lg bg-[#0047A0]/35 border border-[#38BDF8]/30 text-xs font-semibold text-[#00E676] tabular-nums">
+              Escolhas usadas: {usedCount}/{maxSpecials} · Restam {remainingSlots}
+            </div>
+          )}
         </div>
 
         <div className="p-5 overflow-y-auto flex-1">
@@ -133,7 +140,7 @@ export function ConvocationModal({
                 })}
               </div>
             </div>
-          ) : (
+          ) : classic ? null : (
             <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-400">
               {usedCount >= maxSpecials
                 ? `Limite de ${maxSpecials} peças especiais atingido nesta partida.`
@@ -143,8 +150,8 @@ export function ConvocationModal({
 
           {/* Classic Promotion on Last Rank OR Keep Pawn on 6th Rank */}
           {isLastRank ? (
-            <div className="mt-5 pt-4 border-t border-slate-800">
-              <div className="text-xs font-semibold text-slate-300 mb-2">Promoção Clássica</div>
+            <div className={classic ? '' : 'mt-5 pt-4 border-t border-slate-800'}>
+              <div className="text-xs font-semibold text-slate-300 mb-2">{classic ? 'Promover para' : 'Promoção Clássica'}</div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {(['q', 'r', 'b', 'n'] as ClassicKind[]).map((ck) => (
                   <button

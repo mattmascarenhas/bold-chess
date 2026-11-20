@@ -10,15 +10,15 @@ Vou anexar arquivos de um projeto de xadrez (Bold Chess). Sua tarefa: fazer o ma
   com meshes soltos (torso, escudo no peito, 2 braços, cabeça, crista, 2 ear pods, 2 antenas,
   visor azul, bezel verde, 2 olhos "^ ^" feitos de TorusGeometry meio arco).
   Hoje NENHUMA parte tem referência nomeada: só retorna o grupo raiz.
-- Ele é instanciado em `ChessScene.tsx` (~linha 434) ao lado do tabuleiro (pos 5.45, 1.35, -1.6)
+- Ele é instanciado em `ChessScene.tsx.txt` (~linha 434) ao lado do tabuleiro (pos 5.45, 1.35, -1.6)
   e animado em `stepAnimations(dt)` (~linha 776) apenas com flutuação senoidal + um "bounce"
   (`robotBounceRef`) disparado em capturas/convocação/xeque (~linha 983).
 - `ChessScene` recebe a prop `robotMood: 'idle' | 'happy' | 'alert' | 'excited'`, mas ela só é
-  passada pelo `App.tsx` como `inCheck ? 'alert' : 'idle'` e NÃO é usada de fato na animação.
-- Fala do robô (balão no HUD) é controlada em `App.tsx` via `setRobotSpeech/setRobotSpeaker`
+  passada pelo `App.tsx.txt` como `inCheck ? 'alert' : 'idle'` e NÃO é usada de fato na animação.
+- Fala do robô (balão no HUD) é controlada em `App.tsx.txt` via `setRobotSpeech/setRobotSpeaker`
   (xeque, xeque-mate, capturas, peças especiais, emotes) e exibida em `GameHUD.tsx`.
 - Emotes: `MEME_EMOTES` em `game/types.ts` (ids: mim_de_papai, receba, que_isso, tome,
-  bora_bill, uiuiui, eita_giovanna, fala_comigo). Disparados em `App.tsx` (emote local ~linha 930
+  bora_bill, uiuiui, eita_giovanna, fala_comigo). Disparados em `App.tsx.txt` (emote local ~linha 930
   e emote recebido do oponente via websocket ~linha 621). Áudio em `audio/soundEngine.ts`.
 - `MoveKind`/histórico (`capturedKind`, `isCheck`, `isCheckmate`, `kind: 'convocation' | 'promotion'
   | 'castling' | ...`) estão em `game/types.ts`.
@@ -55,7 +55,7 @@ Vou anexar arquivos de um projeto de xadrez (Bold Chess). Sua tarefa: fazer o ma
      `fala_comigo` = inclina a cabeça, olhos em coração/brilho suave, braço acenando.
    - Expressão de olhos via troca/escala de geometria ou grupos de olhos alternativos
      (esconder/mostrar), não recriando meshes a cada frame.
-4. **Ligar às ações do jogo.** Em `ChessScene.tsx` e/ou `App.tsx`:
+4. **Ligar às ações do jogo.** Em `ChessScene.tsx.txt` e/ou `App.tsx`:
    - Substituir o uso morto de `robotMood` por um evento/estado real que chame o animator.
    - Capturas, convocação, promoção, roque, xeque, xeque-mate (vitória/derrota), vez da IA
      pensando, peça especial usada, e cada emote (local E recebido do oponente) disparam o
@@ -82,9 +82,10 @@ Vou anexar arquivos de um projeto de xadrez (Bold Chess). Sua tarefa: fazer o ma
 - Indique como testar manualmente (ex.: um atalho/debug para disparar cada animação em dev).
 
 ## Arquivos anexados (referência)
-- `pieces.ts`      → construção do robô (`createBoldRobot3D`) e materiais (`PieceMaterialSet`)
-- `ChessScene.tsx` → cena Three.js, loop de animação, uso do robô, prop `robotMood`
-- `game-types.ts`  → `MoveKind`, histórico de lances, `MEME_EMOTES`, tipos do jogo (era `src/game/types.ts`)
-- `App.tsx`        → onde fala/emotes/eventos de jogo são disparados e `robotMood` é passado
-- `GameHUD.tsx`    → balão de fala do robô (contexto visual)
-- `soundEngine.ts` → áudio dos emotes (para sincronizar duração da animação, se útil)
+Obs.: anexados como `.txt` (conteúdo é TypeScript/TSX; o nome real do original está entre parênteses).
+- `pieces.ts.txt`      → construção do robô (`createBoldRobot3D`) e materiais (`PieceMaterialSet`)
+- `ChessScene.tsx.txt` → cena Three.js, loop de animação, uso do robô, prop `robotMood`
+- `game-types.ts.txt`  → `MoveKind`, histórico de lances, `MEME_EMOTES`, tipos do jogo (era `src/game/types.ts`)
+- `App.tsx.txt`        → onde fala/emotes/eventos de jogo são disparados e `robotMood` é passado
+- `GameHUD.tsx.txt`    → balão de fala do robô (contexto visual)
+- `soundEngine.ts.txt` → áudio dos emotes (para sincronizar duração da animação, se útil)

@@ -10,8 +10,20 @@ import {
 } from './textures';
 
 export const TABLE_TOP_Y = -0.4;
-export const FLOOR_Y = -7.6;
-export const CEILING_Y = 14.4;
+/**
+ * Escala do cenario: 1 unidade ~ 9,4 cm (o tabuleiro tem 8 unidades = ~75 cm).
+ * Mesa a ~73 cm do chao, assento de cadeira ~45 cm, notebook ~30 cm, pe-direito ~2,6 m.
+ */
+export const FLOOR_Y = -8.2;
+export const CEILING_Y = 19.6;
+
+/** Fatores de escala dos objetos de escritorio (modelados em tamanho "miniatura"). */
+const CHAIR_SCALE = 2.45;
+const LAPTOP_SCALE = 2.1;
+const MONITOR_SCALE = 2.3;
+const BOTTLE_SCALE = 2.6;
+const BOX_SCALE = 2.6;
+const AC_SCALE = 1.7;
 
 export interface RoomEnvironmentBuild {
   group: THREE.Group;
@@ -267,6 +279,7 @@ function buildOfficeChair(kit: SharedPropKit): THREE.Group {
   }
 
   chair.add(spokeA, spokeB, stem, seat, back);
+  chair.scale.setScalar(CHAIR_SCALE);
   return chair;
 }
 
@@ -299,6 +312,7 @@ function buildLaptop(kit: SharedPropKit, screenVariant: number): THREE.Group {
 
   hinge.add(lid, screen);
   laptop.add(base, keys, hinge);
+  laptop.scale.setScalar(LAPTOP_SCALE);
   return laptop;
 }
 
@@ -334,6 +348,7 @@ function buildExternalMonitorSetup(kit: SharedPropKit, screenVariant: number): T
   mouse.position.set(0.84, 0.05, 0.58);
 
   setup.add(pad, monBase, monStand, monFrame, monScreen, kb, mouse);
+  setup.scale.setScalar(MONITOR_SCALE);
   return setup;
 }
 
@@ -345,6 +360,7 @@ function buildWaterBottle(kit: SharedPropKit): THREE.Group {
   const cap = new THREE.Mesh(kit.bottleCapGeo, kit.bottleCapMat);
   cap.position.y = 0.94;
   g.add(body, cap);
+  g.scale.setScalar(BOTTLE_SCALE);
   return g;
 }
 
@@ -356,6 +372,7 @@ function buildKraftGiftBox(kit: SharedPropKit): THREE.Group {
   const ribbon = new THREE.Mesh(kit.kraftRibbonGeo, kit.blueRibbonMat);
   ribbon.position.y = 0.23;
   g.add(box, ribbon);
+  g.scale.setScalar(BOX_SCALE);
   return g;
 }
 
@@ -370,10 +387,10 @@ function buildSecondaryOfficeDesk(
   withMonitors: boolean
 ): THREE.Group {
   const group = new THREE.Group();
-  const deskHeight = TABLE_TOP_Y - FLOOR_Y; // 7.2
-  const width = 11.4;
-  const depth = 4.6;
-  const topThickness = 0.36;
+  const deskHeight = TABLE_TOP_Y - FLOOR_Y; // ~7.8 (73 cm)
+  const width = 16.5;
+  const depth = 6.4;
+  const topThickness = 0.4;
 
   const topGeo = bag.trackGeo(new THREE.BoxGeometry(width, topThickness, depth));
   const top = new THREE.Mesh(topGeo, deskMat);
@@ -384,15 +401,15 @@ function buildSecondaryOfficeDesk(
 
   // Metalon square-frame legs at left and right ends
   const legH = deskHeight - topThickness;
-  for (const lx of [-width / 2 + 0.35, width / 2 - 0.35]) {
-    for (const lz of [-depth / 2 + 0.35, depth / 2 - 0.35]) {
+  for (const lx of [-width / 2 + 0.5, width / 2 - 0.5]) {
+    for (const lz of [-depth / 2 + 0.5, depth / 2 - 0.5]) {
       const leg = new THREE.Mesh(kit.legBoxGeo, kit.metalFrameMat);
-      leg.scale.set(0.75, legH, 0.75);
+      leg.scale.set(1.4, legH, 1.4);
       leg.position.set(lx, legH / 2, lz);
       leg.castShadow = true;
       group.add(leg);
     }
-    const crossbarGeo = bag.trackGeo(new THREE.BoxGeometry(0.2, 0.2, depth - 0.6));
+    const crossbarGeo = bag.trackGeo(new THREE.BoxGeometry(0.3, 0.3, depth - 1));
     const crossbar = new THREE.Mesh(crossbarGeo, kit.metalFrameMat);
     crossbar.position.set(lx, 0.2, 0);
     group.add(crossbar);
@@ -400,33 +417,34 @@ function buildSecondaryOfficeDesk(
 
   // Computers on desk top
   const surfaceY = deskHeight;
+  const FLOOR_Y_LOCAL = 0; // grupo da mesa ja esta apoiado no piso (y local = 0)
   for (let i = 0; i < 3; i++) {
-    const xOffset = -3.6 + i * 3.6;
+    const xOffset = -5.4 + i * 5.4;
     if (withMonitors && i % 2 === 0) {
       const mon = buildExternalMonitorSetup(kit, seed + i);
-      mon.position.set(xOffset, surfaceY, -0.35);
+      mon.position.set(xOffset, surfaceY, -0.9);
       group.add(mon);
     } else {
       const lap = buildLaptop(kit, seed + i);
-      lap.position.set(xOffset, surfaceY, 0.1);
-      lap.rotation.y = (i - 1) * 0.12;
+      lap.position.set(xOffset, surfaceY, 0.3);
+      lap.rotation.y = (i - 1) * 0.1;
       group.add(lap);
     }
 
-    // Ergonomic chair at each workstation
+    // Cadeira em cada estacao: puxada para fora da mesa, assento parcialmente por baixo
     const chair = buildOfficeChair(kit);
-    chair.position.set(xOffset, 0, 2.35);
+    chair.position.set(xOffset, FLOOR_Y_LOCAL, depth / 2 + 1.5);
     chair.rotation.y = Math.PI + (i - 1) * 0.08;
     group.add(chair);
   }
 
   // Bottle or kraft box prop
   const bottle = buildWaterBottle(kit);
-  bottle.position.set(-4.8, surfaceY, -1.2);
+  bottle.position.set(-7.4, surfaceY, -1.7);
   group.add(bottle);
 
   const box = buildKraftGiftBox(kit);
-  box.position.set(4.5, surfaceY, -1.1);
+  box.position.set(7.2, surfaceY, -1.5);
   box.rotation.y = 0.25;
   group.add(box);
 
@@ -496,7 +514,7 @@ function buildMainChessTable(
   const padGeo = bag.trackGeo(new THREE.CylinderGeometry(0.32, 0.36, 0.12, 12));
   for (const [lx, lz] of legPositions) {
     const leg = new THREE.Mesh(kit.legBoxGeo, kit.metalFrameMat);
-    leg.scale.set(1.25, legHeight, 1.25);
+    leg.scale.set(2.0, legHeight, 2.0);
     leg.position.set(lx, FLOOR_Y + legHeight / 2, lz);
     leg.castShadow = true;
     group.add(leg);
@@ -508,65 +526,64 @@ function buildMainChessTable(
 
   // ---- Computers & Props AROUND the chessboard on the Main Table ----
   // Left Flank (x = -7.8) — angled slightly inward toward center
+  // Cada estacao fica de frente para uma cadeira: o teclado aponta para quem senta (fora da mesa)
   const leftMonitor = buildExternalMonitorSetup(kit, 0);
-  leftMonitor.position.set(-8.1, TABLE_TOP_Y, -2.5);
-  leftMonitor.rotation.y = Math.PI * 0.44;
+  leftMonitor.position.set(-7.6, TABLE_TOP_Y, -2.6);
+  leftMonitor.rotation.y = -Math.PI / 2;
   group.add(leftMonitor);
 
   const leftLaptop = buildLaptop(kit, 1);
-  leftLaptop.position.set(-8.1, TABLE_TOP_Y, 2.9);
-  leftLaptop.rotation.y = Math.PI * 0.56;
+  leftLaptop.position.set(-8.4, TABLE_TOP_Y, 2.8);
+  leftLaptop.rotation.y = -Math.PI / 2;
   group.add(leftLaptop);
 
-  // Right Flank (x = +8.2) — mirrored workstations with clear space for Robôzinho
   const rightMonitor = buildExternalMonitorSetup(kit, 2);
-  rightMonitor.position.set(8.2, TABLE_TOP_Y, 2.4);
-  rightMonitor.rotation.y = -Math.PI * 0.56;
+  rightMonitor.position.set(7.6, TABLE_TOP_Y, 2.6);
+  rightMonitor.rotation.y = Math.PI / 2;
   group.add(rightMonitor);
 
   const rightLaptop = buildLaptop(kit, 0);
-  rightLaptop.position.set(8.3, TABLE_TOP_Y, -3.5);
-  rightLaptop.rotation.y = -Math.PI * 0.44;
+  rightLaptop.position.set(8.4, TABLE_TOP_Y, -2.8);
+  rightLaptop.rotation.y = Math.PI / 2;
   group.add(rightLaptop);
 
-  // Corner Laptops framing the front/back edges outside the board footprint
+  // Notebooks nas pontas (jogador de cada cor), fora da area do tabuleiro
   const cornerLaptopW = buildLaptop(kit, 2);
-  cornerLaptopW.position.set(-7.3, TABLE_TOP_Y, 5.1);
-  cornerLaptopW.rotation.y = Math.PI * 0.78;
+  cornerLaptopW.position.set(-6.2, TABLE_TOP_Y, 5.75);
   group.add(cornerLaptopW);
 
   const cornerLaptopB = buildLaptop(kit, 1);
-  cornerLaptopB.position.set(7.3, TABLE_TOP_Y, -5.1);
-  cornerLaptopB.rotation.y = -Math.PI * 0.22;
+  cornerLaptopB.position.set(6.2, TABLE_TOP_Y, -5.75);
+  cornerLaptopB.rotation.y = Math.PI;
   group.add(cornerLaptopB);
 
-  // Water bottles & Bold Kraft boxes on the main table corners
+  // Garrafas e caixas Bold nos cantos livres da mesa
   const bottle1 = buildWaterBottle(kit);
-  bottle1.position.set(-9.1, TABLE_TOP_Y, 0.2);
+  bottle1.position.set(-9.5, TABLE_TOP_Y, 0.2);
   group.add(bottle1);
 
   const bottle2 = buildWaterBottle(kit);
-  bottle2.position.set(9.1, TABLE_TOP_Y, -0.3);
+  bottle2.position.set(9.5, TABLE_TOP_Y, -0.1);
   group.add(bottle2);
 
   const box1 = buildKraftGiftBox(kit);
-  box1.position.set(6.5, TABLE_TOP_Y, 5.1);
-  box1.rotation.y = -0.3;
+  box1.position.set(-9.0, TABLE_TOP_Y, 5.6);
+  box1.rotation.y = 0.3;
   group.add(box1);
 
   const box2 = buildKraftGiftBox(kit);
-  box2.position.set(-6.5, TABLE_TOP_Y, -5.1);
-  box2.rotation.y = 0.35;
+  box2.position.set(9.0, TABLE_TOP_Y, -5.5);
+  box2.rotation.y = -0.3;
   group.add(box2);
 
-  // Ergonomic Swivel Chairs around the main table (positioned off-center so they never block camera sightline to board)
+  // Cadeiras de frente para a mesa (assento um pouco por baixo do tampo)
   const chairSpots: [number, number, number][] = [
-    [-11.2, -2.2, Math.PI / 2],
-    [-11.2, 2.8, Math.PI / 2],
-    [11.2, -2.4, -Math.PI / 2],
-    [11.2, 2.6, -Math.PI / 2],
-    [-6.2, 7.8, Math.PI],
-    [6.2, -7.8, 0],
+    [-12.4, -2.6, Math.PI / 2],
+    [-12.4, 2.8, Math.PI / 2],
+    [12.4, -2.8, -Math.PI / 2],
+    [12.4, 2.6, -Math.PI / 2],
+    [-6.2, 9.6, Math.PI],
+    [6.2, -9.6, 0],
   ];
   for (const [cx, cz, ry] of chairSpots) {
     const chair = buildOfficeChair(kit);
@@ -604,6 +621,7 @@ function buildSplitACUnit(bag: RoomAssetBag): THREE.Group {
   led.position.set(2.1, -0.25, 0.56);
 
   ac.add(shell, louver, led);
+  ac.scale.setScalar(AC_SCALE);
   return ac;
 }
 
@@ -845,11 +863,11 @@ export function buildRoomEnvironment(
 
   // 2. Surrounding Office Desks ("demais mesas") with computers & chairs
   const sideDeskSpots: [number, number, number, boolean][] = [
-    [-18.8, -8.5, Math.PI / 2, true],
-    [-18.8, 8.5, Math.PI / 2, false],
-    [18.8, -8.5, -Math.PI / 2, true],
-    [18.8, 8.5, -Math.PI / 2, true],
-    [0, -16.8, 0, false],
+    [-23.2, -8.5, Math.PI / 2, true],
+    [-23.2, 8.5, Math.PI / 2, false],
+    [23.2, -8.5, -Math.PI / 2, true],
+    [23.2, 8.5, -Math.PI / 2, true],
+    [0, -22.6, 0, false],
   ];
   sideDeskSpots.forEach(([dx, dz, ry, hasMon], idx) => {
     const desk = buildSecondaryOfficeDesk(kit, secondaryDeskMat, bag, idx + 1, hasMon);
@@ -904,7 +922,7 @@ export function buildRoomEnvironment(
     bag.trackGeo(new THREE.BoxGeometry(18.4, 9.6, 0.24)),
     signPanelMat
   );
-  signBacking.position.set(-roomW / 2 + 0.48, 2.2, 0);
+  signBacking.position.set(-roomW / 2 + 0.48, 10.0, 0);
   signBacking.rotation.y = Math.PI / 2;
   group.add(signBacking);
 
@@ -929,7 +947,7 @@ export function buildRoomEnvironment(
     bag.trackGeo(new THREE.BoxGeometry(15.6, 8.8, 0.28)),
     kit.metalFrameMat
   );
-  projFrame.position.set(-1, 3.2, -roomD / 2 + 0.45);
+  projFrame.position.set(-1, 5.0, -roomD / 2 + 0.45);
   group.add(projFrame);
 
   const projScreen = new THREE.Mesh(
@@ -944,32 +962,35 @@ export function buildRoomEnvironment(
       })
     )
   );
-  projScreen.position.set(-1, 3.2, -roomD / 2 + 0.62);
+  projScreen.position.set(-1, 5.0, -roomD / 2 + 0.62);
   group.add(projScreen);
 
   // Right corner Daylight Glass Window on Front Wall (Photo 2)
-  const frontWindow = buildWindowFacade(bag, 16, wallH - 3.6, isStudio);
-  frontWindow.position.set(19, wallCenterY + 0.8, -roomD / 2 + 0.15);
+  const SILL_H = 8; // peitoril ~75 cm
+  const windowH = wallH - SILL_H - 3;
+  const windowCenterY = FLOOR_Y + SILL_H + windowH / 2;
+  const frontWindow = buildWindowFacade(bag, 16, windowH, isStudio);
+  frontWindow.position.set(19, windowCenterY, -roomD / 2 + 0.15);
   group.add(frontWindow);
 
   const frontWindowSill = new THREE.Mesh(
-    bag.trackGeo(new THREE.BoxGeometry(16.5, 3.8, 0.7)),
+    bag.trackGeo(new THREE.BoxGeometry(16.5, SILL_H, 0.7)),
     boldBlueWallMat
   );
-  frontWindowSill.position.set(19, FLOOR_Y + 1.9, -roomD / 2);
+  frontWindowSill.position.set(19, FLOOR_Y + SILL_H / 2, -roomD / 2);
   group.add(frontWindowSill);
 
   // Right Wall (x = +27): Forward Glass Window + Frosted Whiteboard + Split AC Unit (Photos 2 & 4)
-  const rightWindow = buildWindowFacade(bag, 20, wallH - 3.6, isStudio);
+  const rightWindow = buildWindowFacade(bag, 20, windowH, isStudio);
   rightWindow.rotation.y = -Math.PI / 2;
-  rightWindow.position.set(roomW / 2 - 0.15, wallCenterY + 0.8, -15.5);
+  rightWindow.position.set(roomW / 2 - 0.15, windowCenterY, -15.5);
   group.add(rightWindow);
 
   const rightSill = new THREE.Mesh(
-    bag.trackGeo(new THREE.BoxGeometry(0.7, 3.8, 20.5)),
+    bag.trackGeo(new THREE.BoxGeometry(0.7, SILL_H, 20.5)),
     boldBlueWallMat
   );
-  rightSill.position.set(roomW / 2, FLOOR_Y + 1.9, -15.5);
+  rightSill.position.set(roomW / 2, FLOOR_Y + SILL_H / 2, -15.5);
   group.add(rightSill);
 
   const rightSolidWall = new THREE.Mesh(
@@ -992,13 +1013,13 @@ export function buildRoomEnvironment(
     )
   );
   wbBoard.rotation.y = -Math.PI / 2;
-  wbBoard.position.set(roomW / 2 - 0.48, 2.0, 7.5);
+  wbBoard.position.set(roomW / 2 - 0.48, 3.6, 7.5);
   group.add(wbBoard);
 
   // 4 chrome standoffs on whiteboard
   const standoffGeo = bag.trackGeo(new THREE.CylinderGeometry(0.14, 0.14, 0.26, 10));
   for (const wz of [2.5, 12.5]) {
-    for (const wy of [-0.9, 4.9]) {
+    for (const wy of [0.7, 6.5]) {
       const st = new THREE.Mesh(standoffGeo, kit.chromeMat);
       st.rotation.z = Math.PI / 2;
       st.position.set(roomW / 2 - 0.42, wy, wz);
@@ -1009,7 +1030,7 @@ export function buildRoomEnvironment(
   // White Split A/C Unit above the whiteboard (Photos 2, 3, 4)
   const acUnit = buildSplitACUnit(bag);
   acUnit.rotation.y = -Math.PI / 2;
-  acUnit.position.set(roomW / 2 - 0.85, 8.8, 7.5);
+  acUnit.position.set(roomW / 2 - 0.95, 9.6, 7.5);
   group.add(acUnit);
 
   // Back Wall (z = +26): Blue-tinted Glass Office Partition (Photo 3) + Corridor Doorway
@@ -1064,11 +1085,11 @@ export function buildRoomEnvironment(
       })
     )
   );
-  frontWb.position.set(-19.8, 2.1, -roomD / 2 + 0.45);
+  frontWb.position.set(-19.8, 3.0, -roomD / 2 + 0.45);
   group.add(frontWb);
 
   const frontAc = buildSplitACUnit(bag);
-  frontAc.position.set(-19.8, 8.8, -roomD / 2 + 0.85);
+  frontAc.position.set(-19.8, 9.6, -roomD / 2 + 0.95);
   group.add(frontAc);
 
   // Executive Wood Slats accent flanking the projection screen (no Z-overlap)

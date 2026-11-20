@@ -377,7 +377,7 @@ export function createGame(deps: GameDeps): Game {
   /** Cria/entra numa sala de forma atomica para o usuario (sai da sala anterior antes). */
   async function place(
     me: PlayerIdentity,
-    target: { roomId: string } | { create: SceneRoomId; time?: TimeControl | null },
+    target: { roomId: string } | { create: SceneRoomId; time?: TimeControl | null; classic?: boolean },
     mode: 'auto' | 'spectator' | 'w' | 'b',
     after?: (c: Ctx) => Promise<void>
   ): Promise<Place> {
@@ -402,7 +402,7 @@ export function createGame(deps: GameDeps): Game {
             const ins = await q.query(
               `INSERT INTO chess_rooms (id, scene_room, state, state_ver, seats_ver, scored, created_at, updated_at)
                VALUES ($1, $2, $3::jsonb, 1, 1, FALSE, $4, $4) ON CONFLICT (id) DO NOTHING RETURNING id`,
-              [cand, (target as { create: SceneRoomId }).create, JSON.stringify(withClock(createInitialState(true), (target as { time?: TimeControl | null }).time ?? null)), t]
+              [cand, (target as { create: SceneRoomId }).create, JSON.stringify(withClock(createInitialState(true, (target as { classic?: boolean }).classic === true), (target as { time?: TimeControl | null }).time ?? null)), t]
             );
             if (ins.rows[0]) {
               id = cand;
@@ -516,7 +516,7 @@ export function createGame(deps: GameDeps): Game {
           if (!state.winner) return ['bad_request', 'game_not_finished'];
           {
             const both = playersOf(c.members);
-            const fresh = withClock(createInitialState(true), timeControlOf(state), both.w && both.b ? clock() : null);
+            const fresh = withClock(createInitialState(true, state.classic === true), timeControlOf(state), both.w && both.b ? clock() : null);
             if (both.w && both.b) fresh.startedAt = clock();
             await writeState(c, fresh, { resetScored: true });
           }
@@ -571,7 +571,8 @@ export function createGame(deps: GameDeps): Game {
     if (!time.ok) return fail(out, 'bad_request', 'invalid_time');
     const inviteId = randomUUID();
     const expiresAt = t + inviteTtlMs;
-    const res = await place(me, { create: scene, time: time.tc }, 'w', async (c) => {
+    const classic = msg.classic === true;
+    const res = await place(me, { create: scene, time: time.tc, classic }, 'w', async (c) => {
       await c.q.query(
         `INSERT INTO chess_invites (id, from_user, to_user, from_identity, room_id, scene_room, status, created_at, expires_at)
          VALUES ($1, $2, $3, $4::jsonb, $5, $6, 'pending', $7, $8)`,
@@ -580,7 +581,7 @@ export function createGame(deps: GameDeps): Game {
       await addEvents(
         c.q,
         [target],
-        { type: 'invite', inviteId, from: pub(me), roomId: c.room.id, sceneRoom: scene, expiresAt, time: time.tc },
+        { type: 'invite', inviteId, from: pub(me), roomId: c.room.id, sceneRoom: scene, expiresAt, time: time.tc, ...(classic ? { classic: true } : {}) },
         t
       );
     });
@@ -662,7 +663,7 @@ export function createGame(deps: GameDeps): Game {
         return;
       case 'ai_match': {
         // Partida contra a IA jogada no navegador: confere os lances e pontua pelo nivel.
-        const v = verifyAiGame(msg.actions, msg.outcome);
+        const v = verifyAiGame(msg.actions, msg.outcome, msg.classic === true);
         if (!v.ok) return fail(out, 'bad_request', `ai_match_${v.why}`);
         const award = await leaderboard.finishAiMatch({
           user: me,
@@ -688,7 +689,7 @@ export function createGame(deps: GameDeps): Game {
         if ((await roomCount()) >= maxRooms) return fail(out, 'rate_limited', 'too_many_rooms');
         const time = parseTimeControl(msg.time);
         if (!time.ok) return fail(out, 'bad_request', 'invalid_time');
-        const res = await place(me, { create: sceneOrDefault(msg.sceneRoom), time: time.tc }, 'auto');
+        const res = await place(me, { create: sceneOrDefault(msg.sceneRoom), time: time.tc, classic: msg.classic === true }, 'auto');
         if (res.status === 'in_game') return fail(out, 'bad_request', 'in_game');
         if (res.status !== 'ok') return fail(out, 'bad_request');
         out.imm.push({ type: 'room_created', roomId: res.roomId, sceneRoom: res.sceneRoom });
@@ -811,7 +812,7 @@ export function createGame(deps: GameDeps): Game {
       [since]
     );
     const rooms = await db.query(
-      `SELECT r.id, r.scene_room, (r.state->>'winner') AS winner, (r.state->'clock') AS clock,
+      `SELECT r.id, r.scene_room, (r.state->>'winner') AS winner, (r.state->'clock') AS clock, (r.state->>'classic') AS classic,
          json_agg(json_build_object('user_id', m.user_id, 'identity', m.identity, 'seat', m.seat, 'last_seen', m.last_seen)) AS members
        FROM chess_rooms r JOIN chess_members m ON m.room_id = r.id
        GROUP BY r.id HAVING bool_or(m.last_seen > $1)
@@ -833,6 +834,7 @@ export function createGame(deps: GameDeps): Game {
         spectatorCount: ms.filter((m) => m.seat === 'spectator' && m.last_seen > since).length,
         phase: r.winner ? 'finished' : p.w && p.b ? 'playing' : 'waiting',
         time: roomTime(r.clock),
+        ...(r.classic === 'true' ? { classic: true } : {}),
       };
     });
     return { type: 'lobby', online: onlineList, rooms: roomList };

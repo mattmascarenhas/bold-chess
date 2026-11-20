@@ -35,6 +35,7 @@ import {
   getPieceDisplayName,
 } from './game/types';
 import { CameraPreset, ChessScene } from './three/ChessScene';
+import type { RobotAnim } from './three/robotAnimator';
 import type { SocketStatus } from './net/socket';
 import { createTransport, type GameTransport } from './net/transport';
 import {
@@ -146,6 +147,7 @@ export default function App() {
   /** Peca adversaria (ou fora da vez) inspecionada so para visualizar movimentos. */
   const [inspectSquare, setInspectSquare] = useState<Pos | null>(null);
   const aiTimeRef = useRef<TimeControl | null>(null);
+  const aiClassicRef = useRef(false);
   const aiLevelRef = useRef<AIDifficulty>(loadLastAILevel());
   /** estado para o qual ja pedimos jogada a IA (evita pedir de novo ao pausar/retomar) */
   const aiAskedRef = useRef<GameState | null>(null);
@@ -195,6 +197,12 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(0.7);
   const [emoteCooldownSec, setEmoteCooldownSec] = useState(0);
+  const [robotCue, setRobotCue] = useState<{ id: number; anim: RobotAnim } | null>(null);
+  const robotCueSeq = useRef(0);
+  const cueRobot = useCallback((anim: RobotAnim) => {
+    robotCueSeq.current += 1;
+    setRobotCue({ id: robotCueSeq.current, anim });
+  }, []);
   const [robotSpeech, setRobotSpeech] = useState(
     'Partida pronta! Escolha suas jogadas com ousadia.'
   );
@@ -438,7 +446,7 @@ export default function App() {
     }
     aiSubmittedRef.current = true;
     const outcome = gameState.endReason === 'resign' ? 'resign' : gameState.endReason === 'timeout' ? 'timeout' : undefined;
-    sock.send({ type: 'ai_match', level: aiLevelRef.current, actions: aiLogRef.current, outcome });
+    sock.send({ type: 'ai_match', level: aiLevelRef.current, actions: aiLogRef.current, outcome, ...(aiClassicRef.current ? { classic: true } : {}) });
   }, [mode, gameState.winner, gameState.endReason, connection, pushNotice]);
 
   // A selecao de inspecao some quando o jogo anda
@@ -618,6 +626,7 @@ export default function App() {
           const em = MEME_EMOTES.find((e) => e.id === msg.emoteId);
           if (em) {
             soundEngine.playEmote(em.id);
+            cueRobot(em.id as RobotAnim);
             setRobotSpeaker(msg.fromColor === 'b' ? 'Pretas (Emote)' : 'Brancas (Emote)');
             setRobotSpeech(em.speech);
           }
@@ -627,7 +636,7 @@ export default function App() {
           setInvites((prev) =>
             prev.some((i) => i.inviteId === msg.inviteId)
               ? prev
-              : [...prev, { inviteId: msg.inviteId, from: msg.from, roomId: msg.roomId, expiresAt: msg.expiresAt, time: msg.time ?? null }]
+              : [...prev, { inviteId: msg.inviteId, from: msg.from, roomId: msg.roomId, expiresAt: msg.expiresAt, time: msg.time ?? null, classic: msg.classic === true }]
           );
           if (!tabActiveRef.current) notifyLocal('Xadrez Bold', `${msg.from.name} te desafiou para uma partida`);
         });
@@ -704,8 +713,9 @@ export default function App() {
     return () => clearTimeout(id);
   }, [isCreatingRoom]);
 
-  const handleStartAI = useCallback((_skipDraft = true, time?: TimeControl | null, level?: AIDifficulty) => {
+  const handleStartAI = useCallback((_skipDraft = true, time?: TimeControl | null, level?: AIDifficulty, classic?: boolean) => {
     if (time !== undefined) aiTimeRef.current = time;
+    if (classic !== undefined) aiClassicRef.current = classic;
     if (level) {
       aiLevelRef.current = level;
       setAiLevelLabel(getAILevel(level).label);
@@ -726,25 +736,27 @@ export default function App() {
     setSelectedSquare(null);
     setLegalMoves([]);
     setPendingPromotionDest(null);
-    setGameState(withClock(createInitialState(true), aiTimeRef.current, aiTimeRef.current ? Date.now() : null));
+    setGameState(withClock(createInitialState(true, aiClassicRef.current), aiTimeRef.current, aiTimeRef.current ? Date.now() : null));
     setInspectSquare(null);
     setRobotSpeaker('Robôzinho da Bold');
     setRobotSpeech(
-      'Partida aberta! Chegue à 6ª ou 8ª fileira para convocar especiais.'
+      aiClassicRef.current
+        ? 'Xadrez clássico! Sem peças especiais: vença no tabuleiro.'
+        : 'Partida aberta! Chegue à 6ª ou 8ª fileira para convocar especiais.'
     );
     setScreen('playing');
   }, []);
 
-  const handleCreateRoom = useCallback((time: TimeControl | null) => {
+  const handleCreateRoom = useCallback((time: TimeControl | null, classic = false) => {
     if (!socketRef.current) return;
     setIsCreatingRoom(true);
-    socketRef.current.send({ type: 'create_room', sceneRoom, time });
+    socketRef.current.send({ type: 'create_room', sceneRoom, time, ...(classic ? { classic: true } : {}) });
   }, [sceneRoom]);
 
   const handleChallenge = useCallback(
-    (userId: string, time: TimeControl | null) => {
+    (userId: string, time: TimeControl | null, classic = false) => {
       setChallengingUserId(userId);
-      socketRef.current?.send({ type: 'challenge', targetUserId: userId, sceneRoom, time });
+      socketRef.current?.send({ type: 'challenge', targetUserId: userId, sceneRoom, time, ...(classic ? { classic: true } : {}) });
       pushNotice('Desafio enviado. Aguardando resposta...', 'info');
     },
     [sceneRoom, pushNotice]
@@ -927,6 +939,7 @@ export default function App() {
       const em = MEME_EMOTES.find((e) => e.id === emoteId);
       if (em) {
         soundEngine.playEmote(em.id);
+        cueRobot(em.id as RobotAnim);
         setRobotSpeaker('Você (Emote)');
         setRobotSpeech(em.speech);
       }
@@ -1011,7 +1024,8 @@ export default function App() {
         cameraPreset={cameraPreset}
         roomId={sceneRoom}
         isTitleScreen={screen === 'title' || screen === 'lobby'}
-        robotMood={gameState.inCheck ? 'alert' : 'idle'}
+        robotMood={gameState.inCheck ? 'alert' : aiThinking ? 'thinking' : 'idle'}
+        robotCue={robotCue}
         onSquareClick={handleSquareClick}
       />
 
@@ -1132,6 +1146,7 @@ export default function App() {
           <ConvocationModal
             pending={gameState.pendingConvocation}
             usedCount={gameState.usedSpecials[gameState.pendingConvocation.color].length}
+            classic={gameState.classic === true}
             onResolve={handleResolveConvocation}
           />
         ) : pendingPromotionDest ? (
@@ -1146,6 +1161,7 @@ export default function App() {
                   availableSpecials: getConvocationOffer(gameState, c),
                 }}
                 usedCount={gameState.usedSpecials[c].length}
+                classic={gameState.classic === true}
                 onResolve={handleResolveConvocation}
               />
             );
@@ -1168,12 +1184,12 @@ export default function App() {
           confirmLabel={setup.kind === 'ai' ? 'Começar' : setup.kind === 'room' ? 'Criar sala' : 'Enviar desafio'}
           onCancel={() => setSetup(null)}
           showDifficulty={setup.kind === 'ai'}
-          onConfirm={(tc, level) => {
+          onConfirm={(tc, level, classic) => {
             const s = setup;
             setSetup(null);
-            if (s.kind === 'ai') handleStartAI(false, tc, level);
-            else if (s.kind === 'room') handleCreateRoom(tc);
-            else handleChallenge(s.userId, tc);
+            if (s.kind === 'ai') handleStartAI(false, tc, level, classic);
+            else if (s.kind === 'room') handleCreateRoom(tc, classic);
+            else handleChallenge(s.userId, tc, classic);
           }}
         />
       )}

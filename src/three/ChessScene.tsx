@@ -4,6 +4,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Color, GameState, MoveOption, Pos, SceneRoomId, isSpecialKind } from '../game/types';
 import { buildChessPieceMesh, createBoldRobot3D, createPieceMaterialSet, PieceMaterialSet } from './pieces';
+import { CaptureFxManager } from './captureFx';
+import { FIDGETS, RobotAnim, RobotAnimator, RobotMood, pick, reactionForMove } from './robotAnimator';
 import { CEILING_Y, RoomEnvironmentBuild, buildRoomEnvironment } from './rooms';
 import {
   createBoardRimCoordTexture,
@@ -22,7 +24,9 @@ interface ChessSceneProps {
   cameraPreset: CameraPreset;
   roomId: SceneRoomId;
   isTitleScreen: boolean;
-  robotMood: 'idle' | 'happy' | 'alert' | 'excited';
+  robotMood: RobotMood;
+  /** animacao pontual pedida de fora (emotes) */
+  robotCue?: { id: number; anim: RobotAnim } | null;
   onSquareClick: (pos: Pos) => void;
 }
 
@@ -79,6 +83,7 @@ export function ChessScene({
   roomId,
   isTitleScreen,
   robotMood,
+  robotCue,
   onSquareClick,
 }: ChessSceneProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -92,6 +97,7 @@ export function ChessScene({
     roomId,
     isTitleScreen,
     robotMood,
+    robotCue,
     onSquareClick,
   });
   propsRef.current = {
@@ -103,6 +109,7 @@ export function ChessScene({
     roomId,
     isTitleScreen,
     robotMood,
+    robotCue,
     onSquareClick,
   };
 
@@ -110,7 +117,7 @@ export function ChessScene({
   const cameraFnRef = useRef<((preset: CameraPreset, focus?: Pos | null) => void) | null>(null);
   const loopFnRef = useRef<(() => void) | null>(null);
   const setRoomFnRef = useRef<((nextRoom: SceneRoomId) => void) | null>(null);
-  const robotBounceRef = useRef<number>(0);
+  const animatorRef = useRef<RobotAnimator | null>(null);
 
   // Detect software WebGL once
   useEffect(() => {
@@ -431,11 +438,19 @@ export function ChessScene({
     let beamTimer = 0;
 
     // 3D Robôzinho da Bold Mascot beside the board
-    const robotGroup = createBoldRobot3D(pieceMats, !isSoftwareGl);
+    const robotRig = createBoldRobot3D(pieceMats, !isSoftwareGl);
+    const robotGroup = robotRig.root;
     robotGroup.position.set(5.45, 1.35, -1.6);
     robotGroup.rotation.y = -0.65;
     robotGroup.scale.setScalar(1.05);
     scene.add(robotGroup);
+    const animator = new RobotAnimator(robotRig);
+    animatorRef.current = animator;
+    animator.setMood(propsRef.current.robotMood);
+
+    // Efeitos de peca derrotada
+    const fxManager = new CaptureFxManager(scene, isSoftwareGl);
+    let seenHistoryLen = propsRef.current.gameState.history.length;
 
     // Piece visuals map
     const pieceVisuals = new Map<string, PieceVisual>();
@@ -522,11 +537,31 @@ export function ChessScene({
         }
       }
 
-      // Remove captured/transformed pieces
+      // Remove captured/transformed pieces (capturadas ganham uma animacao de derrota)
+      const lastRec = gs.history.length > seenHistoryLen ? gs.history[gs.history.length - 1] : null;
+      seenHistoryLen = gs.history.length;
+      let victimTaken = false;
       for (const [key, vis] of pieceVisuals.entries()) {
         if (!seenIds.has(key)) {
-          piecesLayer.remove(vis.mesh);
           pieceVisuals.delete(key);
+          if (
+            lastRec?.capturedKind &&
+            !victimTaken &&
+            vis.kind === lastRec.capturedKind &&
+            vis.color !== lastRec.color
+          ) {
+            victimTaken = true;
+            const dark = vis.color === 'b';
+            fxManager.play(
+              fxManager.choose(vis.kind),
+              vis.mesh,
+              { body: dark ? 0x1a2232 : 0xeaf0f7, accent: dark ? 0x00e676 : 0x0047a0 },
+              0.2
+            );
+            activeAnimUntil = Math.max(activeAnimUntil, performance.now() + 2200);
+          } else {
+            piecesLayer.remove(vis.mesh);
+          }
         }
       }
 
@@ -604,7 +639,7 @@ export function ChessScene({
         }
       }
 
-      let needsLoop = beamTimer > 0 || robotBounceRef.current > 0;
+      let needsLoop = beamTimer > 0 || animator.isActive() || fxManager.active;
       for (const vis of pieceVisuals.values()) {
         if (vis.isMoving || vis.spawnProgress < 1) {
           needsLoop = true;
@@ -647,6 +682,7 @@ export function ChessScene({
 
     // Raycasting (click vs drag detection)
     const raycaster = new THREE.Raycaster();
+    const boardPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const pointer = new THREE.Vector2();
     let downX = 0;
     let downY = 0;
@@ -663,9 +699,11 @@ export function ChessScene({
         return pieceHits[0].object.userData.square as Pos;
       }
 
-      const sqHits = raycaster.intersectObjects(clickables, false);
-      if (sqHits.length > 0 && sqHits[0].object.userData.square) {
-        return sqHits[0].object.userData.square as Pos;
+      // Casa pela intersecao com o plano do tabuleiro (sem "frestas" entre as casas)
+      if (raycaster.ray.intersectPlane(boardPlane, _vec3A)) {
+        const col = Math.floor(_vec3A.x + 4);
+        const row = Math.floor(_vec3A.z + 4);
+        if (row >= 0 && row < 8 && col >= 0 && col < 8) return { row, col };
       }
       return null;
     };
@@ -703,6 +741,36 @@ export function ChessScene({
       requestRender();
     };
 
+    // Gesto que comeca em cima do tabuleiro/pecas nunca gira nem da zoom na camera:
+    // so serve para jogar. Girar/zoom ficam para os gestos fora do tabuleiro.
+    let activePointers = 0;
+    let gestureOnBoard = false;
+
+    const onPointerDownCapture = (e: PointerEvent) => {
+      activePointers += 1;
+      if (activePointers === 1) {
+        gestureOnBoard = !propsRef.current.isTitleScreen && getHitSquare(e.clientX, e.clientY) !== null;
+      }
+      controls.enabled = !gestureOnBoard;
+    };
+
+    const onPointerEnd = () => {
+      activePointers = Math.max(0, activePointers - 1);
+      if (activePointers === 0) {
+        gestureOnBoard = false;
+        controls.enabled = true;
+      }
+    };
+
+    const onWheelCapture = (e: WheelEvent) => {
+      if (propsRef.current.isTitleScreen) return;
+      if (getHitSquare(e.clientX, e.clientY) !== null) {
+        // rolagem sobre o tabuleiro nao mexe no zoom
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+    };
+
     const onControlStart = () => {
       cameraLerpTargetPos = null;
       cameraLerpTargetLook = null;
@@ -713,6 +781,10 @@ export function ChessScene({
       requestRender();
     };
 
+    renderer.domElement.addEventListener('pointerdown', onPointerDownCapture, true);
+    renderer.domElement.addEventListener('wheel', onWheelCapture, { capture: true, passive: false });
+    window.addEventListener('pointerup', onPointerEnd);
+    window.addEventListener('pointercancel', onPointerEnd);
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
     renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('pointermove', onPointerMove);
@@ -772,13 +844,10 @@ export function ChessScene({
     function stepAnimations(dt: number) {
       elapsed += dt;
 
-      // Robôzinho gentle float & bounce
-      if (robotBounceRef.current > 0) {
-        robotBounceRef.current = Math.max(0, robotBounceRef.current - dt * 2.2);
-      }
-      const bounceOffset = Math.sin(robotBounceRef.current * Math.PI * 3) * robotBounceRef.current * 0.45;
-      robotGroup.position.y = 1.35 + Math.sin(elapsed * 2.0) * 0.1 + bounceOffset;
-      robotGroup.rotation.y = -0.65 + Math.sin(elapsed * 1.1) * 0.08;
+      // Robozinho: animador (poses, reacoes, emotes) e efeitos de captura
+      animator.setMood(propsRef.current.robotMood);
+      animator.update(dt);
+      const fxRunning = fxManager.update(dt);
 
       // Title screen smooth orbital pan inside the 3D room (showing table, computers, and Bold room)
       if (propsRef.current.isTitleScreen) {
@@ -854,7 +923,8 @@ export function ChessScene({
         anyMoving ||
         Boolean(cameraLerpTargetPos) ||
         propsRef.current.isTitleScreen ||
-        robotBounceRef.current > 0
+        fxRunning ||
+        animator.isActive()
       );
     }
 
@@ -917,6 +987,19 @@ export function ChessScene({
       renderer.compile(scene, camera);
     }
 
+    // De tempos em tempos o robo faz uma gracinha sozinho (acorda o loop e volta a dormir)
+    let fidgetTimer = 0;
+    const scheduleFidget = () => {
+      fidgetTimer = window.setTimeout(() => {
+        if (!disposed && document.visibilityState === 'visible' && !propsRef.current.isTitleScreen) {
+          animator.play(pick(FIDGETS));
+          ensureLoopRunning();
+        }
+        if (!disposed) scheduleFidget();
+      }, 9000 + Math.random() * 9000);
+    };
+    scheduleFidget();
+
     applyRoomTheme(propsRef.current.roomId);
     syncBoardVisuals();
     stepAnimations(0.016);
@@ -925,10 +1008,18 @@ export function ChessScene({
 
     return () => {
       disposed = true;
+      clearTimeout(fidgetTimer);
+      fxManager.dispose();
+      robotRig.dispose();
+      animatorRef.current = null;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
       ro.disconnect();
       controls.dispose();
+      renderer.domElement.removeEventListener('pointerdown', onPointerDownCapture, true);
+      renderer.domElement.removeEventListener('wheel', onWheelCapture, true);
+      window.removeEventListener('pointerup', onPointerEnd);
+      window.removeEventListener('pointercancel', onPointerEnd);
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointermove', onPointerMove);
@@ -980,19 +1071,41 @@ export function ChessScene({
     }
   }, [cameraPreset, isTitleScreen]);
 
-  // Trigger close-up on captures or convocations + bounce robot
+  // Robozinho reage aos lances (a camera nao se mexe sozinha)
   useEffect(() => {
     const lm = gameState.lastMove;
     if (!lm || isTitleScreen) return;
     const lastHist = gameState.history[gameState.history.length - 1];
-    if (lastHist && (lastHist.capturedKind || lastHist.kind === 'convocation' || lastHist.isCheck)) {
-      robotBounceRef.current = 1;
+    const spectatorView = (propsRef.current.playerPerspective as string) === 'spectator';
+    if (!lastHist) return;
+    const persp = propsRef.current.playerPerspective;
+    const winner = gameState.winner;
+    const anim = reactionForMove({
+      kind: lastHist.kind,
+      capturedKind: lastHist.capturedKind,
+      isCheck: lastHist.isCheck,
+      isCheckmate: lastHist.isCheckmate,
+      moverIsViewer: spectatorView ? null : lastHist.color === persp,
+      viewerWon: spectatorView || !winner || winner === 'draw' ? null : winner === persp,
+    });
+    if (anim) {
+      animatorRef.current?.play(anim);
       loopFnRef.current?.();
-      if (lastHist.kind === 'convocation' || lastHist.capturedKind) {
-        cameraFnRef.current?.(cameraPreset, lm.to);
-      }
     }
-  }, [gameState.history.length, isTitleScreen, cameraPreset, gameState.lastMove]);
+  }, [gameState.history.length, isTitleScreen, gameState.lastMove]);
+
+  // Animacao pedida de fora (emotes)
+  useEffect(() => {
+    if (!robotCue) return;
+    animatorRef.current?.play(robotCue.anim);
+    loopFnRef.current?.();
+  }, [robotCue?.id]);
+
+  // Mudanca de humor base (IA pensando, xeque...) acorda o loop
+  useEffect(() => {
+    animatorRef.current?.setMood(robotMood);
+    loopFnRef.current?.();
+  }, [robotMood]);
 
   return (
     <div
